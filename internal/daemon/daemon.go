@@ -45,6 +45,9 @@ type Server struct {
 	Now      func() time.Time
 	// Peer reports who is on the other end of a connection; platform.PeerOf.
 	Peer func(*net.UnixConn) (platform.Peer, error)
+	// Exit ends the helper, for `stop` and the idle timeout. Main's removes
+	// the socket and exits the process.
+	Exit func()
 
 	mu       sync.Mutex // guards cache and lastUsed
 	cache    *cache
@@ -60,6 +63,7 @@ func NewServer(p provider.Provider, a approve.Approver) *Server {
 		Approver: a,
 		Now:      time.Now,
 		Peer:     platform.PeerOf,
+		Exit:     func() { os.Exit(0) },
 		cache:    newCache(Window, Cap),
 		lastUsed: time.Now(),
 	}
@@ -84,7 +88,8 @@ func Main(version string) error {
 		return err
 	}
 	s := NewServer(&provider.OnePassword{Version: version}, approve.Dialog{Timeout: ApprovalTimeout})
-	go s.reap(func() { _ = os.Remove(path); os.Exit(0) })
+	s.Exit = func() { _ = os.Remove(path); os.Exit(0) }
+	go s.reap(time.Tick(Sweep))
 	return s.Serve(ln)
 }
 
@@ -133,17 +138,17 @@ func (s *Server) Serve(ln *net.UnixListener) error {
 	}
 }
 
-// reap drops expired secrets every Sweep and calls exit once the helper has
+// reap drops expired secrets on every tick and exits the helper once it has
 // gone IdleExit without a request. By then every secret has expired anyway.
-func (s *Server) reap(exit func()) {
-	for range time.Tick(Sweep) {
+func (s *Server) reap(ticks <-chan time.Time) {
+	for range ticks {
 		s.mu.Lock()
 		now := s.Now()
 		s.cache.sweep(now)
 		idle := now.Sub(s.lastUsed) >= IdleExit
 		s.mu.Unlock()
 		if idle {
-			exit()
+			s.Exit()
 			return
 		}
 	}
@@ -180,10 +185,7 @@ func (s *Server) handle(conn *net.UnixConn) {
 		reply(conn, proto.Response{})
 	case proto.OpStop:
 		reply(conn, proto.Response{})
-		if path, err := platform.SocketPath(); err == nil {
-			_ = os.Remove(path)
-		}
-		os.Exit(0)
+		s.Exit()
 	default:
 		reply(conn, proto.Response{Error: fmt.Sprintf("unknown op %q", req.Op)})
 	}

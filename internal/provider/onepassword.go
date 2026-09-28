@@ -17,8 +17,28 @@ import (
 type OnePassword struct {
 	Version string
 
+	// connect makes one account's client. The 1Password SDK, unless a test
+	// swaps in a fake.
+	connect func(ctx context.Context, account, version string) (resolver, error)
+
 	mu      sync.Mutex
-	clients map[string]*onepassword.Client
+	clients map[string]resolver
+}
+
+// resolver is the one SDK call credlock makes.
+type resolver interface {
+	ResolveAll(ctx context.Context, refs []string) (onepassword.ResolveAllResponse, error)
+}
+
+func connectSDK(ctx context.Context, account, version string) (resolver, error) {
+	c, err := onepassword.NewClient(ctx,
+		onepassword.WithDesktopAppIntegration(account),
+		onepassword.WithIntegrationInfo("credlock", version),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return c.Secrets(), nil
 }
 
 // ResolveAll fetches refs from account in a single SDK call.
@@ -51,7 +71,7 @@ func (p *OnePassword) resolveAll(ctx context.Context, account string, refs []str
 	if err != nil {
 		return nil, fmt.Errorf("connecting to the 1Password app: %w", err)
 	}
-	resp, err := client.Secrets().ResolveAll(ctx, refs)
+	resp, err := client.ResolveAll(ctx, refs)
 	if err != nil {
 		return nil, fmt.Errorf("1Password: %w", err)
 	}
@@ -81,21 +101,22 @@ func (p *OnePassword) resolveAll(ctx context.Context, account string, refs []str
 	return values, nil
 }
 
-func (p *OnePassword) client(ctx context.Context, account string) (*onepassword.Client, error) {
+func (p *OnePassword) client(ctx context.Context, account string) (resolver, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if c, ok := p.clients[account]; ok {
 		return c, nil
 	}
-	c, err := onepassword.NewClient(ctx,
-		onepassword.WithDesktopAppIntegration(account),
-		onepassword.WithIntegrationInfo("credlock", p.Version),
-	)
+	connect := p.connect
+	if connect == nil {
+		connect = connectSDK
+	}
+	c, err := connect(ctx, account, p.Version)
 	if err != nil {
 		return nil, err
 	}
 	if p.clients == nil {
-		p.clients = map[string]*onepassword.Client{}
+		p.clients = map[string]resolver{}
 	}
 	p.clients[account] = c
 	return c, nil
