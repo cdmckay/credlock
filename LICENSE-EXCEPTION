@@ -1,0 +1,22 @@
+credlock is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See LICENSE.
+
+Copyright (C) 2026 Cameron McKay
+
+
+Additional permission under GNU GPL version 3 section 7
+
+If you modify this Program, or any covered work, by linking or combining it
+with the 1Password SDK for Go (github.com/1password/onepassword-sdk-go), or a
+modified version of that library, including the compiled core it embeds and
+the libraries it loads from the 1Password app, containing parts covered by the
+terms of their own licenses, the licensors of this Program grant you
+additional permission to convey the resulting work.
+
+Why: the SDK is MIT-licensed, but it compiles a prebuilt core into every
+binary that uses it, and that core's source is not published. Without this
+permission, nobody could distribute a credlock binary while meeting the GPL's
+requirement to provide the Corresponding Source for all of it. Building from
+source is unaffected either way.
