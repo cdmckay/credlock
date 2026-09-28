@@ -72,9 +72,16 @@ mode 0700 and refuses to use if anyone else owns it.
 
 - Within its hour, an approved secret is served to any process running as you,
   without a prompt. Approvals are not tied to one command.
+- **Known attack vector: any app with macOS Accessibility permission can click
+  Allow for you.** An agent running inside such an app could approve its own
+  request. Without that permission, macOS refuses scripted clicks and keystrokes
+  and drops synthetic mouse events (tested), so keep terminals, IDEs and agent
+  hosts out of System Settings → Privacy & Security → Accessibility. A planned,
+  optional fix is to require a security-key tap after Allow
+  ([#1](https://github.com/cdmckay/credlock/issues/1)).
 - The dialog records your consent. It is not a barrier against malware already
-  running as you, which could click it, or read the environment of the command
-  you approved.
+  running as you, which could read the environment of the command you
+  approved.
 - The command you approve can do anything with the secrets it receives, as with
   `op run`.
 - macOS only for now. The operating-system pieces sit behind
