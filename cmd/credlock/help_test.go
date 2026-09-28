@@ -13,8 +13,9 @@ func TestTheHelpCarriesWhatAnAgentNeeds(t *testing.T) {
 		"credlock run --account", // a worked example
 		"--reason",
 		"the account_uuid column of 'op account list', not user_uuid",
-		`there is no "Private" alias`,
-		`"Personal" in a personal account, "Employee" in 1Password Business`,
+		`personal account SDK: "Personal" (op also takes "Private"; the SDK doesn't)`,
+		`1Password Business SDK: "Private" (the app and op show it as "Employee")`,
+		"A vaultNotFound error lists the vaults",
 		"77 the request was denied",
 		"vaultNotFound",
 		"Only a person can answer it",

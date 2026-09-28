@@ -25,8 +25,8 @@ const runHelp = `credlock run
   reference replaced by the secret it names. Put the references in the
   environment, then wrap the command:
 
-    GITHUB_TOKEN='op://Employee/GitHub/token' \
-      credlock run --account acme --reason "open the release PR" -- gh pr create
+    GITHUB_TOKEN='op://Personal/GitHub/token' \
+      credlock run --account my --reason "open the release PR" -- gh pr create
 
   Anything not yet approved opens a dialog showing the reason, the command,
   the directory, the requesting process and each secret. Only a person can
@@ -49,10 +49,12 @@ const runHelp = `credlock run
 
 References
   op://VAULT/ITEM/FIELD, or op://VAULT/ITEM/SECTION/FIELD, each part by name
-  or ID, as with 'op read'. One difference from the op CLI: there is no
-  "Private" alias for the built-in vault. Use its real name, as shown in the
-  1Password app: "Personal" in a personal account, "Employee" in 1Password
-  Business. Or use the vault's ID.
+  or ID, as with 'op read'. Vault names are the 1Password SDK's, which differ
+  from the op CLI's for the built-in vault, and cross over:
+    personal account     SDK: "Personal"  (op also takes "Private"; the SDK doesn't)
+    1Password Business   SDK: "Private"   (the app and op show it as "Employee")
+  When in doubt, use the vault's ID. A vaultNotFound error lists the vaults
+  the account has.
 
 Exit status
   COMMAND's own, once it runs.

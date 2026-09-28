@@ -148,9 +148,12 @@ func (p *OnePassword) resolveAll(ctx context.Context, account string, refs []str
 func explain(ref string, why onepassword.ResolveReferenceErrorTypes) string {
 	switch {
 	case why == onepassword.ResolveReferenceErrorTypeVariantVaultNotFound && strings.HasPrefix(ref, "op://Private/"):
-		// The op CLI accepts "Private" as an alias for the built-in vault; the
-		// SDK wants its real name or ID.
-		return `vaultNotFound: the SDK has no "Private" alias; use the vault's real name, e.g. op://Personal/… (personal account) or op://Employee/… (1Password Business)`
+		// The names of the built-in vault cross over between the op CLI and
+		// the SDK: op takes "Private" for a personal account's, which the SDK
+		// calls "Personal"; in 1Password Business it is "Private" to the SDK.
+		return `vaultNotFound: in a personal account the SDK calls the built-in vault "Personal" (the op CLI's "Private" alias doesn't work here); "Private" is only right in 1Password Business`
+	case why == onepassword.ResolveReferenceErrorTypeVariantVaultNotFound && strings.HasPrefix(ref, "op://Employee/"):
+		return `vaultNotFound: in 1Password Business the SDK calls the vault the app shows as "Employee" "Private"; try op://Private/…`
 	case why == onepassword.ResolveReferenceErrorTypeVariantVaultNotFound:
 		return "vaultNotFound: no such vault in this account; check --account first, then the vault name"
 	case why == onepassword.ResolveReferenceErrorTypeVariantItemNotFound:

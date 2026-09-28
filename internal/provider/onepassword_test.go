@@ -131,18 +131,29 @@ func TestThePrivateAliasGetsAHint(t *testing.T) {
 	}}
 	h := &harness{clients: []*fakeClient{c}}
 	_, err := h.provider().ResolveAll(context.Background(), "acct", []string{"op://Private/i/f"})
-	if err == nil || !strings.Contains(err.Error(), `no "Private" alias`) || !strings.Contains(err.Error(), "op://Employee/") {
+	if err == nil || !strings.Contains(err.Error(), `SDK calls the built-in vault "Personal"`) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestTheEmployeeNameGetsAHint(t *testing.T) {
+	c := &fakeClient{answer: func(string) response {
+		return failure(onepassword.NewResolveReferenceErrorTypeVariantVaultNotFound())
+	}}
+	h := &harness{clients: []*fakeClient{c}}
+	_, err := h.provider().ResolveAll(context.Background(), "acct", []string{"op://Employee/i/f"})
+	if err == nil || !strings.Contains(err.Error(), "try op://Private/") {
 		t.Fatalf("got %v", err)
 	}
 }
 
 func TestAVaultNotFoundNamesTheAccountAndItsVaults(t *testing.T) {
-	c := &fakeClient{vaults: []string{"Employee", "Shared"}, answer: func(string) response {
+	c := &fakeClient{vaults: []string{"Private", "Shared"}, answer: func(string) response {
 		return failure(onepassword.NewResolveReferenceErrorTypeVariantVaultNotFound())
 	}}
 	h := &harness{clients: []*fakeClient{c}}
-	_, err := h.provider().ResolveAll(context.Background(), "WORKACCOUNTID", []string{"op://Employee/i/f"})
-	for _, want := range []string{"account WORKACCOUNTID", "check --account", `The vaults in this account are "Employee", "Shared"`} {
+	_, err := h.provider().ResolveAll(context.Background(), "WORKACCOUNTID", []string{"op://Engineering/i/f"})
+	for _, want := range []string{"account WORKACCOUNTID", "check --account", `The vaults in this account are "Private", "Shared"`} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("error lacks %q: %v", want, err)
 		}

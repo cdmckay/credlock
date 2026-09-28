@@ -34,9 +34,11 @@ transcript. Only the command you approve receives them.
    email, or the account's name as shown in the app. Run `credlock run` with no
    account to list the accounts set up on the machine.
 
-References use the SDK's syntax, `op://vault/item/field`. One difference from
-the `op` CLI: the SDK has no `Private` alias for your built-in vault. In a
-personal account it is called `Personal`.
+References use the SDK's syntax, `op://vault/item/field`. The built-in
+vault's name differs from the `op` CLI's, and crosses over: in a personal
+account the SDK calls it `Personal` (`op` also takes `Private`), while in
+1Password Business the SDK calls it `Private` (the app and `op` show
+`Employee`). A `vaultNotFound` error lists the account's vaults.
 
 ## Commands
 
