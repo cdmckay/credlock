@@ -1,6 +1,6 @@
 module github.com/cdmckay/credlock
 
-go 1.26.7
+go 1.26.0
 
 require (
 	github.com/1password/onepassword-sdk-go v0.4.1
