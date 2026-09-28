@@ -24,6 +24,9 @@ import (
 // ExitDenied is the exit status when you deny a request (EX_NOPERM).
 const ExitDenied = 77
 
+// approvalWindow is how long the dialog waits, for messages; see daemon.ApprovalTimeout.
+const approvalWindow = "2 minutes"
+
 // RunArgs is a parsed `credlock run` command line.
 type RunArgs struct {
 	Reason  string
@@ -52,13 +55,13 @@ flags:
 			set(&r, name, value)
 			args = args[1:]
 		case strings.HasPrefix(a, "-"):
-			return r, fmt.Errorf("unknown flag %s", a)
+			return r, fmt.Errorf("unknown flag %s: credlock run takes --account and --reason, before the command; '--' ends them (see 'credlock help run')", a)
 		default:
 			break flags
 		}
 	}
 	if len(args) == 0 {
-		return r, errors.New("no command given")
+		return r, errors.New("no command given: credlock run [--account ACCOUNT] [--reason TEXT] [--] COMMAND [ARGS...] (see 'credlock help run')")
 	}
 	r.Command = args
 	if r.Account == "" {
@@ -114,28 +117,42 @@ func Run(args []string) int {
 	}
 	secrets := Refs(os.Environ())
 	env := os.Environ()
+	if len(secrets) == 0 {
+		fmt.Fprintf(os.Stderr, "credlock: no environment variable holds an op:// reference, so %s runs without secrets. "+
+			"Set them for the command, e.g. TOKEN='op://Vault/Item/field' credlock run ... (see 'credlock help run')\n", r.Command[0])
+	}
 	if len(secrets) > 0 {
+		account, label, err := ResolveAccount(r.Account, Accounts())
+		if err != nil {
+			return fail(err)
+		}
 		cwd, _ := os.Getwd()
 		resp, err := Call(proto.Request{
-			Op:      proto.OpResolve,
-			Account: r.Account,
-			Reason:  r.Reason,
-			Command: r.Command,
-			Cwd:     cwd,
-			Secrets: secrets,
+			Op:           proto.OpResolve,
+			Account:      account,
+			AccountLabel: label,
+			Reason:       r.Reason,
+			Command:      r.Command,
+			Cwd:          cwd,
+			Secrets:      secrets,
 		}, true)
 		if err != nil {
 			return fail(err)
 		}
+		if resp.TimedOut {
+			fmt.Fprintf(os.Stderr, "credlock: nobody answered the approval dialog within %s, which counts as a denial. "+
+				"Ask the person to watch for it, then run the command again.\n", approvalWindow)
+			return ExitDenied
+		}
 		if resp.Denied {
-			fmt.Fprintln(os.Stderr, "credlock: request denied")
+			fmt.Fprintln(os.Stderr, "credlock: the request was denied in the approval dialog. Don't retry it: ask the person why, or what to do instead.")
 			return ExitDenied
 		}
 		env = Fill(env, secrets, resp.Values)
 	}
 	path, err := exec.LookPath(r.Command[0])
 	if err != nil {
-		return fail(err)
+		return fail(fmt.Errorf("%s: not found on PATH (credlock runs the command itself, so pass the program and its arguments after --)", r.Command[0]))
 	}
 	err = syscall.Exec(path, r.Command, env)
 	return fail(fmt.Errorf("running %s: %w", r.Command[0], err))
@@ -154,9 +171,16 @@ func Status() int {
 	fmt.Printf("credlock: helper running (pid %d)\n", resp.PID)
 	if len(resp.Entries) == 0 {
 		fmt.Println("nothing approved")
+		return 0
 	}
+	fmt.Println("approved (no values shown):")
+	names := labels(Accounts())
 	for _, e := range resp.Entries {
-		fmt.Printf("  %s  (%s)  expires in %s\n", e.Ref, e.Account, (time.Duration(e.ExpiresIn) * time.Second).Round(time.Minute))
+		account := e.Account
+		if label, ok := names[e.Account]; ok {
+			account = label
+		}
+		fmt.Printf("  %s  in %s, expires in %s\n", e.Ref, account, (time.Duration(e.ExpiresIn) * time.Second).Round(time.Minute))
 	}
 	return 0
 }

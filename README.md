@@ -5,7 +5,7 @@ is being asked for, by whom, and why.
 
 ```bash
 GITHUB_TOKEN='op://Personal/GitHub/token' \
-  credlock run --reason "list my open pull requests" -- gh pr list
+  credlock run --account my --reason "list my open pull requests" -- gh pr list
 ```
 
 The first time, a native dialog shows the reason, the command, the directory,
@@ -28,9 +28,11 @@ transcript. Only the command you approve receives them.
    **Integrate with the 1Password SDKs**, choose **Integrate with other apps**.
 2. Install: `nix profile install github:cdmckay/credlock`, or build with
    `go build ./cmd/credlock` (cgo is required).
-3. Tell credlock your account, by name as it appears at the top left of the
-   1Password sidebar or by account ID (`op account list` shows it): pass
-   `--account`, or set `CREDLOCK_ACCOUNT` or `OP_ACCOUNT`.
+3. Tell credlock which account the secrets are in, with `--account` or
+   `CREDLOCK_ACCOUNT`. It takes the account ID (the `account_uuid` column of
+   `op account list`), the sign-in address or its first part (`my`), your
+   email, or the account's name as shown in the app. Run `credlock run` with no
+   account to list the accounts set up on the machine.
 
 References use the SDK's syntax, `op://vault/item/field`. One difference from
 the `op` CLI: the SDK has no `Private` alias for your built-in vault. In a

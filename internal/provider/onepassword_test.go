@@ -15,8 +15,11 @@ type response = onepassword.Response[onepassword.ResolvedReference, onepassword.
 type fakeClient struct {
 	err    error
 	answer func(ref string) response
+	vaults []string
 	calls  int
 }
+
+func (c *fakeClient) VaultTitles(context.Context) ([]string, error) { return c.vaults, nil }
 
 func (c *fakeClient) ResolveAll(_ context.Context, refs []string) (onepassword.ResolveAllResponse, error) {
 	c.calls++
@@ -76,7 +79,7 @@ func TestAMissingSecretDoesNotReconnect(t *testing.T) {
 	h := &harness{clients: []*fakeClient{c, {answer: ok}}}
 	_, err := h.provider().ResolveAll(context.Background(), "acct", []string{"op://v/i/nope"})
 	var missing *unresolved
-	if !errors.As(err, &missing) || !strings.Contains(err.Error(), "op://v/i/nope (fieldNotFound)") {
+	if !errors.As(err, &missing) || !strings.Contains(err.Error(), "op://v/i/nope (fieldNotFound") {
 		t.Fatalf("got %v", err)
 	}
 	if len(h.accounts) != 1 {
@@ -128,8 +131,33 @@ func TestThePrivateAliasGetsAHint(t *testing.T) {
 	}}
 	h := &harness{clients: []*fakeClient{c}}
 	_, err := h.provider().ResolveAll(context.Background(), "acct", []string{"op://Private/i/f"})
-	if err == nil || !strings.Contains(err.Error(), "try op://Personal/") {
+	if err == nil || !strings.Contains(err.Error(), `no "Private" alias`) || !strings.Contains(err.Error(), "op://Employee/") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestAVaultNotFoundNamesTheAccountAndItsVaults(t *testing.T) {
+	c := &fakeClient{vaults: []string{"Employee", "Shared"}, answer: func(string) response {
+		return failure(onepassword.NewResolveReferenceErrorTypeVariantVaultNotFound())
+	}}
+	h := &harness{clients: []*fakeClient{c}}
+	_, err := h.provider().ResolveAll(context.Background(), "WORKACCOUNTID", []string{"op://Employee/i/f"})
+	for _, want := range []string{"account WORKACCOUNTID", "check --account", `The vaults in this account are "Employee", "Shared"`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("error lacks %q: %v", want, err)
+		}
+	}
+}
+
+func TestADeniedApprovalSaysWhatToCheck(t *testing.T) {
+	p := &OnePassword{connect: func(context.Context, string, string) (resolver, error) {
+		return nil, errors.New("error initializing client: Denied authorization for SDK client")
+	}}
+	_, err := p.ResolveAll(context.Background(), "WORKACCOUNTID", []string{"op://v/i/f"})
+	for _, want := range []string{"did not authorize credlock for account WORKACCOUNTID", "Integrate with other apps", "Ask the person"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("error lacks %q: %v", want, err)
+		}
 	}
 }
 

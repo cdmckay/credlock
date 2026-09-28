@@ -21,12 +21,15 @@ type Secret struct {
 
 // Request is what the client asks of the helper.
 type Request struct {
-	Op      string   `json:"op"`
-	Account string   `json:"account,omitempty"`
-	Reason  string   `json:"reason,omitempty"`
-	Command []string `json:"command,omitempty"`
-	Cwd     string   `json:"cwd,omitempty"`
-	Secrets []Secret `json:"secrets,omitempty"`
+	Op      string `json:"op"`
+	Account string `json:"account,omitempty"`
+	// AccountLabel is how the dialog names the account, e.g.
+	// "my.1password.com (me@example.com)". Display only.
+	AccountLabel string   `json:"account_label,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
+	Command      []string `json:"command,omitempty"`
+	Cwd          string   `json:"cwd,omitempty"`
+	Secrets      []Secret `json:"secrets,omitempty"`
 }
 
 // Entry describes one approved secret for `credlock status`. It never carries
@@ -39,9 +42,11 @@ type Entry struct {
 
 // Response is the helper's answer.
 type Response struct {
-	Values  map[string]string `json:"values,omitempty"` // by reference
-	Denied  bool              `json:"denied,omitempty"`
-	Error   string            `json:"error,omitempty"`
-	Entries []Entry           `json:"entries,omitempty"`
-	PID     int               `json:"pid,omitempty"`
+	Values map[string]string `json:"values,omitempty"` // by reference
+	Denied bool              `json:"denied,omitempty"`
+	// TimedOut marks a denial because nobody answered the dialog.
+	TimedOut bool    `json:"timed_out,omitempty"`
+	Error    string  `json:"error,omitempty"`
+	Entries  []Entry `json:"entries,omitempty"`
+	PID      int     `json:"pid,omitempty"`
 }

@@ -14,45 +14,46 @@ import (
 // version is set at build time with -ldflags "-X main.version=…".
 var version = "0.1.0-dev"
 
-const usage = `credlock hands secrets to one command at a time, after you approve what and why.
-
-Usage:
-  credlock run [--reason TEXT] [--account NAME] [--] COMMAND [ARGS...]
-      Run COMMAND with every environment variable whose value is an op://
-      reference replaced by its secret. Anything not yet approved is shown to
-      you in a dialog first. An approval lasts an hour after its last use, and
-      a day at most. The account defaults to $CREDLOCK_ACCOUNT, then $OP_ACCOUNT.
-      Exits 77 if you deny the request.
-  credlock status   Show whether the helper is running and what it holds (never values).
-  credlock clear    Forget every approved secret.
-  credlock stop     Stop the helper, forgetting everything.
-`
-
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprint(os.Stderr, overview)
 		os.Exit(2)
 	}
-	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
+	os.Exit(dispatch(os.Args[1], os.Args[2:]))
+}
+
+func dispatch(cmd string, args []string) int {
+	switch cmd {
 	case "run":
-		os.Exit(client.Run(args))
+		if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+			fmt.Print(runHelp)
+			return 0
+		}
+		return client.Run(args)
 	case "status":
-		os.Exit(client.Status())
+		return client.Status()
 	case "clear":
-		os.Exit(client.Clear())
+		return client.Clear()
 	case "stop":
-		os.Exit(client.Stop())
+		return client.Stop()
 	case proto.HelperCommand:
 		if err := daemon.Main(version); err != nil {
 			fmt.Fprintln(os.Stderr, "credlock helper:", err)
-			os.Exit(1)
+			return 1
 		}
+		return 0
 	case "help", "-h", "--help":
-		fmt.Print(usage)
+		if len(args) > 0 && args[0] == "run" {
+			fmt.Print(runHelp)
+		} else {
+			fmt.Print(overview)
+		}
+		return 0
 	case "version", "--version":
 		fmt.Println("credlock", version)
+		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "credlock: unknown command %q\n\n%s", cmd, usage)
-		os.Exit(2)
+		fmt.Fprintf(os.Stderr, "credlock: unknown command %q; see 'credlock help'\n", cmd)
+		return 2
 	}
 }

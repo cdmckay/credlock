@@ -19,5 +19,5 @@ func Supported(ref string) error {
 	if strings.HasPrefix(ref, "op://") {
 		return nil
 	}
-	return fmt.Errorf("%q is not a reference credlock can resolve (only op:// so far)", ref)
+	return fmt.Errorf("%q is not a reference credlock can resolve: only op://VAULT/ITEM/FIELD (1Password) so far", ref)
 }

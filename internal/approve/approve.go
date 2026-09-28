@@ -28,10 +28,14 @@ type Request struct {
 	Cap       time.Duration  // ...and never longer than this
 }
 
-// Approver decides a request. false with a nil error means "denied".
+// Approver decides a request. false with a nil error means "denied";
+// ErrTimedOut means nobody answered, which also counts as a denial.
 type Approver interface {
 	Approve(ctx context.Context, r Request) (bool, error)
 }
+
+// ErrTimedOut is a dialog nobody answered in time.
+var ErrTimedOut = errors.New("nobody answered the approval dialog in time")
 
 // Dialog asks through a native dialog. On macOS that is the system alert; on
 // Linux the same library drives zenity or kdialog. Deny is the default, and a
@@ -54,8 +58,10 @@ func (d Dialog) Approve(ctx context.Context, r Request) (bool, error) {
 	switch {
 	case err == nil:
 		return true, nil
-	case errors.Is(err, zenity.ErrCanceled), ctx.Err() != nil:
+	case errors.Is(err, zenity.ErrCanceled):
 		return false, nil
+	case ctx.Err() != nil:
+		return false, ErrTimedOut
 	default:
 		return false, err
 	}

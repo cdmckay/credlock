@@ -25,9 +25,29 @@ type OnePassword struct {
 	clients map[string]resolver
 }
 
-// resolver is the one SDK call credlock makes.
+// resolver is what credlock asks of one account: the secrets, and the names of
+// its vaults, for explaining a vault that isn't there.
 type resolver interface {
 	ResolveAll(ctx context.Context, refs []string) (onepassword.ResolveAllResponse, error)
+	VaultTitles(ctx context.Context) ([]string, error)
+}
+
+type sdkClient struct{ c *onepassword.Client }
+
+func (s sdkClient) ResolveAll(ctx context.Context, refs []string) (onepassword.ResolveAllResponse, error) {
+	return s.c.Secrets().ResolveAll(ctx, refs)
+}
+
+func (s sdkClient) VaultTitles(ctx context.Context) ([]string, error) {
+	vaults, err := s.c.Vaults().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	titles := make([]string, len(vaults))
+	for i, v := range vaults {
+		titles[i] = v.Title
+	}
+	return titles, nil
 }
 
 func connectSDK(ctx context.Context, account, version string) (resolver, error) {
@@ -38,7 +58,7 @@ func connectSDK(ctx context.Context, account, version string) (resolver, error) 
 	if err != nil {
 		return nil, err
 	}
-	return c.Secrets(), nil
+	return sdkClient{c}, nil
 }
 
 // ResolveAll fetches refs from account in a single SDK call.
@@ -60,16 +80,39 @@ func (p *OnePassword) ResolveAll(ctx context.Context, account string, refs []str
 }
 
 // unresolved is 1Password answering, but not with a secret for every reference.
-type unresolved struct{ refs []string }
+type unresolved struct {
+	account string
+	refs    []string
+	vaults  []string // the account's vault names, when a vault was not found
+}
 
 func (e *unresolved) Error() string {
-	return "1Password could not resolve " + strings.Join(e.refs, ", ")
+	msg := fmt.Sprintf("1Password account %s could not resolve %s", e.account, strings.Join(e.refs, "; "))
+	if len(e.vaults) > 0 {
+		quoted := make([]string, len(e.vaults))
+		for i, v := range e.vaults {
+			quoted[i] = fmt.Sprintf("%q", v)
+		}
+		msg += fmt.Sprintf(". The vaults in this account are %s. If yours isn't among them, it is in another account: check --account", strings.Join(quoted, ", "))
+	}
+	return msg
+}
+
+// connectError explains a failure to get a client for account.
+func connectError(account string, err error) error {
+	if strings.Contains(err.Error(), "Denied authorization") {
+		return fmt.Errorf("1Password did not authorize credlock for account %s: the approval was declined in 1Password, "+
+			"or that account's SDK integration is off (1Password > Settings > Developer > Integrate with the 1Password SDKs > "+
+			"Integrate with other apps). Ask the person which, then run the command again: %w", account, err)
+	}
+	return fmt.Errorf("connecting to the 1Password app for account %s: %w. Check that 1Password is running and unlocked, and that "+
+		"Settings > Developer > Integrate with other apps is on", account, err)
 }
 
 func (p *OnePassword) resolveAll(ctx context.Context, account string, refs []string) (map[string]string, error) {
 	client, err := p.client(ctx, account)
 	if err != nil {
-		return nil, fmt.Errorf("connecting to the 1Password app: %w", err)
+		return nil, connectError(account, err)
 	}
 	resp, err := client.ResolveAll(ctx, refs)
 	if err != nil {
@@ -77,28 +120,46 @@ func (p *OnePassword) resolveAll(ctx context.Context, account string, refs []str
 	}
 	values := make(map[string]string, len(refs))
 	var failed []string
+	var vaultMissing bool
 	for _, ref := range refs {
 		r, ok := resp.IndividualResponses[ref]
 		switch {
 		case !ok || (r.Content == nil && r.Error == nil):
 			failed = append(failed, ref+" (no answer)")
 		case r.Error != nil:
-			why := string(r.Error.Type)
-			if strings.HasPrefix(ref, "op://Private/") && why == "vaultNotFound" {
-				// The op CLI accepts "Private" as an alias for the built-in vault;
-				// the SDK wants its real name, which in a personal account is
-				// "Personal" (or its vault ID).
-				why += `; the SDK has no "Private" alias, try op://Personal/…`
-			}
-			failed = append(failed, fmt.Sprintf("%s (%s)", ref, why))
+			vaultMissing = vaultMissing || r.Error.Type == onepassword.ResolveReferenceErrorTypeVariantVaultNotFound
+			failed = append(failed, fmt.Sprintf("%s (%s)", ref, explain(ref, r.Error.Type)))
 		default:
 			values[ref] = r.Content.Secret
 		}
 	}
 	if len(failed) > 0 {
-		return nil, &unresolved{refs: failed}
+		e := &unresolved{account: account, refs: failed}
+		if vaultMissing {
+			// Same client, same approval: listing names costs no extra prompt.
+			e.vaults, _ = client.VaultTitles(ctx)
+		}
+		return nil, e
 	}
 	return values, nil
+}
+
+// explain turns the SDK's error types into what to check next.
+func explain(ref string, why onepassword.ResolveReferenceErrorTypes) string {
+	switch {
+	case why == onepassword.ResolveReferenceErrorTypeVariantVaultNotFound && strings.HasPrefix(ref, "op://Private/"):
+		// The op CLI accepts "Private" as an alias for the built-in vault; the
+		// SDK wants its real name or ID.
+		return `vaultNotFound: the SDK has no "Private" alias; use the vault's real name, e.g. op://Personal/… (personal account) or op://Employee/… (1Password Business)`
+	case why == onepassword.ResolveReferenceErrorTypeVariantVaultNotFound:
+		return "vaultNotFound: no such vault in this account; check --account first, then the vault name"
+	case why == onepassword.ResolveReferenceErrorTypeVariantItemNotFound:
+		return "itemNotFound: no such item in that vault"
+	case why == onepassword.ResolveReferenceErrorTypeVariantFieldNotFound:
+		return "fieldNotFound: the item has no such field"
+	default:
+		return string(why)
+	}
 }
 
 func (p *OnePassword) client(ctx context.Context, account string) (resolver, error) {

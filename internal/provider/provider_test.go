@@ -19,12 +19,12 @@ func TestOnlyOpReferencesAreSupported(t *testing.T) {
 func TestUnresolvedReferencesAreNotRetried(t *testing.T) {
 	// A retry means a fresh client and a fresh approval prompt, so it must be
 	// kept for session failures, never for references that don't resolve.
-	var err error = &unresolved{refs: []string{"op://v/i/f (fieldNotFound)"}}
+	var err error = &unresolved{account: "acct", refs: []string{"op://v/i/f (fieldNotFound)"}}
 	var u *unresolved
 	if !errors.As(err, &u) {
 		t.Fatal("an unresolved reference would be retried")
 	}
-	if err.Error() != "1Password could not resolve op://v/i/f (fieldNotFound)" {
+	if err.Error() != "1Password account acct could not resolve op://v/i/f (fieldNotFound)" {
 		t.Fatalf("message %q", err.Error())
 	}
 }

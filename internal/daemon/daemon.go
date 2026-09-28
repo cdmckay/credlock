@@ -217,12 +217,15 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, peer platform.P
 			Command:   req.Command,
 			Cwd:       req.Cwd,
 			Requester: fmt.Sprintf("%s (pid %d)", peer.Name, peer.PID),
-			Account:   req.Account,
+			Account:   firstNonEmpty(req.AccountLabel, req.Account),
 			Secrets:   missing,
 			Approved:  len(uniqueRefs(req.Secrets)) - len(uniqueRefs(missing)),
 			Window:    Window,
 			Cap:       Cap,
 		})
+		if errors.Is(err, approve.ErrTimedOut) {
+			return proto.Response{Denied: true, TimedOut: true}
+		}
 		if err != nil {
 			return proto.Response{Error: "showing the approval dialog: " + err.Error()}
 		}
@@ -270,6 +273,15 @@ func (s *Server) lookup(req proto.Request) (map[string]string, []proto.Secret) {
 		}
 	}
 	return values, missing
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func uniqueRefs(secrets []proto.Secret) []string {
