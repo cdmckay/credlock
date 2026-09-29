@@ -87,7 +87,7 @@ func Main(version string) error {
 	if err != nil {
 		return err
 	}
-	s := NewServer(&provider.OnePassword{Version: version}, approve.Dialog{Timeout: ApprovalTimeout})
+	s := NewServer(&provider.OnePassword{Version: version}, approve.Default(ApprovalTimeout))
 	s.Exit = func() { _ = os.Remove(path); os.Exit(0) }
 	go s.reap(time.Tick(Sweep))
 	return s.Serve(ln)
