@@ -9,10 +9,15 @@ GITHUB_TOKEN='op://Personal/GitHub/token' \
 ```
 
 The first time, an approval window shows the reason, the command, the
-directory, the requesting process, and each secret it wants. If you allow it, credlock
-fetches everything it is missing from 1Password in one call and runs the command
-with the real values in its environment. An approval lasts an hour after its
+directory, the requesting process, and each secret it wants. If you allow it,
+credlock fetches everything it is missing from 1Password in one call and runs
+the command with the real values in its environment. An approval lasts an hour after its
 last use, and a day at most, so the next hour of runs needs no prompt at all.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/approval-window-dark.png">
+  <img src="docs/images/approval-window-light.png" width="620" alt="credlock's approval window. The reason sits in its own card, above the command, directory, requesting process, 1Password account and how long the approval lasts. The requested secrets are listed by variable and reference, above large Deny and Allow buttons and a countdown to the automatic denial.">
+</picture>
 
 It was written for coding agents, which run each command in a fresh shell with
 no terminal. There, a bare `op read` asks for Touch ID on every call, because the
