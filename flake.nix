@@ -14,16 +14,20 @@
       packages = forAllSystems (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          # The last release, from VERSION, plus the commit it was built from:
+          # a build of main between releases is "0.1.0+6d36c09", not "0.1.0".
+          release = pkgs.lib.removeSuffix "\n" (builtins.readFile ./VERSION);
+          version = "${release}+${self.shortRev or self.dirtyShortRev or "unknown"}";
         in
         {
           default = pkgs.buildGoModule {
             pname = "credlock";
-            version = "0.1.0";
+            inherit version;
             src = self;
             vendorHash = "sha256-mo8Mng+EEV3nhCaMtwVsVIHE+P+hC7RWg7hz5x+8Cu8=";
             # The 1Password SDK's desktop-app sign-in needs cgo.
             env.CGO_ENABLED = 1;
-            ldflags = [ "-s" "-w" "-X main.version=0.1.0" ];
+            ldflags = [ "-s" "-w" "-X main.version=${version}" ];
             meta = {
               description = "Hand secrets to one command at a time, after you've seen what is asked for and why";
               homepage = "https://github.com/cdmckay/credlock";

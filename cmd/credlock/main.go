@@ -5,6 +5,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
+	"strings"
 
 	"github.com/cdmckay/credlock/internal/approve"
 	"github.com/cdmckay/credlock/internal/client"
@@ -12,8 +14,21 @@ import (
 	"github.com/cdmckay/credlock/internal/proto"
 )
 
-// version is set at build time with -ldflags "-X main.version=…".
-var version = "0.1.0-dev"
+// version is set at build time with -ldflags "-X main.version=…", as the Nix
+// flake and the Homebrew formula do. A plain `go install` leaves it empty, and
+// the module version stands in (see currentVersion).
+var version = ""
+
+// currentVersion is the version credlock reports, without a leading "v".
+func currentVersion() string {
+	if version != "" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return strings.TrimPrefix(bi.Main.Version, "v")
+	}
+	return "dev"
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -38,7 +53,7 @@ func dispatch(cmd string, args []string) int {
 	case "stop":
 		return client.Stop()
 	case proto.HelperCommand:
-		if err := daemon.Main(version); err != nil {
+		if err := daemon.Main(currentVersion()); err != nil {
 			fmt.Fprintln(os.Stderr, "credlock helper:", err)
 			return 1
 		}
@@ -53,7 +68,7 @@ func dispatch(cmd string, args []string) int {
 		}
 		return 0
 	case "version", "--version":
-		fmt.Println("credlock", version)
+		fmt.Println("credlock", currentVersion())
 		return 0
 	default:
 		fmt.Fprintf(os.Stderr, "credlock: unknown command %q; see 'credlock help'\n", cmd)

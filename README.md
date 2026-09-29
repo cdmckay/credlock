@@ -31,8 +31,11 @@ transcript. Only the command you approve receives them.
 
 1. In the 1Password app, open **Settings → Developer** and, under
    **Integrate with the 1Password SDKs**, choose **Integrate with other apps**.
-2. Install: `nix profile install github:cdmckay/credlock`, or build with
-   `go build ./cmd/credlock` (cgo is required).
+2. Install it, one of these ways:
+   - Homebrew: `brew install cdmckay/tap/credlock`
+   - Nix: `nix profile install github:cdmckay/credlock`
+   - Go, with Apple's command line tools for cgo:
+     `go install github.com/cdmckay/credlock/cmd/credlock@latest`
 3. Tell credlock which account the secrets are in, with `--account` or
    `CREDLOCK_ACCOUNT`. It takes the account ID (the `account_uuid` column of
    `op account list`), the sign-in address or its first part (`my`), your
@@ -96,6 +99,12 @@ mode 0700 and refuses to use if anyone else owns it.
 - macOS only for now. The operating-system pieces sit behind
   `internal/platform`. On Linux, approvals would use a plain zenity dialog
   until credlock has a window there too.
+
+## Releases
+
+credlock uses [Semantic Versioning](https://semver.org). What changed in each
+release is in [CHANGELOG.md](CHANGELOG.md), and how a release is cut is in
+[RELEASING.md](RELEASING.md).
 
 ## License
 

@@ -32,6 +32,8 @@ jobs:
           unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
       - run: go vet ./...
+      - name: VERSION has a matching CHANGELOG.md section
+        run: scripts/check-release.sh "v$(cat VERSION)"
       - name: Tests, with the race detector
         run: go test -race -count=1 ./...
         env:
