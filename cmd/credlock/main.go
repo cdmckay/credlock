@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/cdmckay/credlock/internal/approve"
 	"github.com/cdmckay/credlock/internal/client"
 	"github.com/cdmckay/credlock/internal/daemon"
 	"github.com/cdmckay/credlock/internal/proto"
@@ -42,6 +43,8 @@ func dispatch(cmd string, args []string) int {
 			return 1
 		}
 		return 0
+	case approve.WindowCommand:
+		return approve.WindowMain(os.Stdin, os.Stdout)
 	case "help", "-h", "--help":
 		if len(args) > 0 && args[0] == "run" {
 			fmt.Print(runHelp)

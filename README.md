@@ -8,8 +8,8 @@ GITHUB_TOKEN='op://Personal/GitHub/token' \
   credlock run --account my --reason "list my open pull requests" -- gh pr list
 ```
 
-The first time, a native dialog shows the reason, the command, the directory,
-the requesting process, and each secret it wants. If you allow it, credlock
+The first time, an approval window shows the reason, the command, the
+directory, the requesting process, and each secret it wants. If you allow it, credlock
 fetches everything it is missing from 1Password in one call and runs the command
 with the real values in its environment. An approval lasts an hour after its
 last use, and a day at most, so the next hour of runs needs no prompt at all.
@@ -55,9 +55,13 @@ account the SDK calls it `Personal` (`op` also takes `Private`), while in
   with the reason, command, directory and account, to a per-user helper over a
   unix socket. It starts the helper if it isn't running.
 - The helper checks with the kernel that the caller is the same user, then
-  answers what it already holds. Anything new goes to the dialog, one dialog at
-  a time. Deny is the default, and a dialog left unanswered for two minutes
-  counts as a denial.
+  answers what it already holds. Anything new goes to the approval window, one
+  at a time: a native AppKit window that the helper opens in a child process.
+  Deny is the default. Esc denies and Return does nothing, so typing that lands
+  on the window can't approve anything. Allow takes a mouse click, and ignores
+  clicks for its first second on screen, so a click meant for another window
+  can't land on it. A window left unanswered for two minutes counts as a
+  denial, and one that fails or crashes never counts as Allow.
 - On Allow, it resolves every missing reference in one `ResolveAll` call. The
   1Password app shows its own approval only when its session for the helper has
   lapsed, after ten idle minutes.
@@ -79,13 +83,14 @@ mode 0700 and refuses to use if anyone else owns it.
   hosts out of System Settings → Privacy & Security → Accessibility. A planned,
   optional fix is to require a security-key tap after Allow
   ([#1](https://github.com/cdmckay/credlock/issues/1)).
-- The dialog records your consent. It is not a barrier against malware already
+- The window records your consent. It is not a barrier against malware already
   running as you, which could read the environment of the command you
   approved.
 - The command you approve can do anything with the secrets it receives, as with
   `op run`.
 - macOS only for now. The operating-system pieces sit behind
-  `internal/platform`, and the dialog library already supports Linux.
+  `internal/platform`. On Linux, approvals would use a plain zenity dialog
+  until credlock has a window there too.
 
 ## License
 

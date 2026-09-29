@@ -37,9 +37,10 @@ type Approver interface {
 // ErrTimedOut is a dialog nobody answered in time.
 var ErrTimedOut = errors.New("nobody answered the approval dialog in time")
 
-// Dialog asks through a native dialog. On macOS that is the system alert; on
-// Linux the same library drives zenity or kdialog. Deny is the default, and a
-// dialog nobody answers within Timeout counts as a denial.
+// Dialog asks through the zenity library's plain dialog: zenity or kdialog on
+// Linux, the system alert on macOS. It is the approver where credlock has no
+// window of its own (see Default). Deny is the default, and a dialog nobody
+// answers within Timeout counts as a denial.
 type Dialog struct {
 	Timeout time.Duration
 }
