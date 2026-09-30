@@ -1,0 +1,47 @@
+name: Release
+
+# Pushing a tag like v1.2.3 publishes a GitHub release for it, with that
+# version's CHANGELOG.md section as the notes, once the tag checks out and the
+# tests pass. RELEASING.md has the whole process.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Publish the release
+    runs-on: macos-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # to create the release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # to check the tag is on main
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+      - name: The tag, VERSION and CHANGELOG.md agree, and the tag is on main
+        run: scripts/check-release.sh "$GITHUB_REF_NAME" --on-main
+      - name: Tests, with the race detector
+        run: go test -race -count=1 ./...
+      - name: The build reports the tagged version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          go build -ldflags "-s -w -X main.version=$version" -o credlock ./cmd/credlock
+          test "$(./credlock version)" = "credlock $version"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          scripts/release-notes.sh "$version" > notes.md
+          prerelease=()
+          if [[ $version == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "credlock $version" \
+            --notes-file notes.md "${prerelease[@]}"
