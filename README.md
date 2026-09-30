@@ -74,6 +74,16 @@ account the SDK calls it `Personal` (`op` also takes `Private`), while in
   1Password app shows its own approval only when its session for the helper has
   lapsed, after ten idle minutes.
 - The client then replaces itself with the command, holding the secrets.
+- While the helper holds secrets, a key in the menu bar shows how many. It
+  turns into an eye for a few seconds whenever secrets are read, cached or
+  not. Its menu is the access log, the held secrets with the time each has
+  left, and Forget and Stop. It runs as another child of the helper, and is
+  sent names, references and times, never values.
+
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/menubar-icon-dark.png">
+    <img src="docs/images/menubar-icon-light.png" width="260" alt="The menu bar icon: a key and the number 4 at rest, and the same key with an orange dot on its corner while secrets are being read.">
+  </picture>
 - The helper keeps values in memory only, drops each an hour after its last use
   or a day after its approval, and exits after an idle hour.
 

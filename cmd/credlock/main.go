@@ -11,12 +11,14 @@ import (
 	"github.com/cdmckay/credlock/internal/approve"
 	"github.com/cdmckay/credlock/internal/client"
 	"github.com/cdmckay/credlock/internal/daemon"
+	"github.com/cdmckay/credlock/internal/menubar"
 	"github.com/cdmckay/credlock/internal/proto"
 )
 
 // version is set at build time with -ldflags "-X main.version=…", as the Nix
-// flake and the Homebrew formula do. A plain `go install` leaves it empty, and
-// the module version stands in (see currentVersion).
+// flake and the Homebrew formula do. Otherwise it is empty, and the version Go
+// stamps into the build stands in: the module version for `go install`, or one
+// worked out from the git tags for a `go build` in a checkout.
 var version = ""
 
 // currentVersion is the version credlock reports, without a leading "v".
@@ -60,6 +62,8 @@ func dispatch(cmd string, args []string) int {
 		return 0
 	case approve.WindowCommand:
 		return approve.WindowMain(os.Stdin, os.Stdout)
+	case menubar.Command:
+		return menubar.Main(os.Stdin, os.Stdout)
 	case "help", "-h", "--help":
 		if len(args) > 0 && args[0] == "run" {
 			fmt.Print(runHelp)

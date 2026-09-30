@@ -7,6 +7,16 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Added
+
+- A menu bar icon shows a key and the number of secrets credlock is holding.
+  It turns into an eye for a few seconds whenever secrets are read, so a
+  cached secret can't be used without your seeing it. Clicking it shows the
+  access log (when, which command and why, which secrets, and whether they came
+  from the cache), the held secrets with the time each has left, and ways to
+  forget one secret, forget them all, or stop credlock. The icon never sees a
+  secret's value, and nothing in its menu can approve anything.
+
 ## [0.1.0] - 2026-09-29
 
 The first release. macOS only.

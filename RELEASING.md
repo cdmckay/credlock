@@ -101,4 +101,5 @@ between them compatible within a major version, or say in the changelog that
 - The Homebrew formula passes the tagged version: `0.1.0`.
 - `go install github.com/cdmckay/credlock/cmd/credlock@v0.1.0` reports the
   module version, `0.1.0`.
-- A plain `go build` reports `dev`.
+- A plain `go build` in a checkout reports what Go works out from the git tags,
+  like `0.1.0+dirty` or a pseudo-version; built without git, it reports `dev`.
