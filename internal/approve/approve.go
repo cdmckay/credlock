@@ -151,3 +151,11 @@ func human(d time.Duration) string {
 		return d.String()
 	}
 }
+
+// Clean flattens control characters in client text and cuts it to n runes,
+// for anything else that shows it, such as the menu bar's access log.
+func Clean(s string, n int) string { return clean(s, n) }
+
+// CommandLine renders argv as a shell would need it typed, flattened and cut
+// to n runes.
+func CommandLine(argv []string, n int) string { return clean(quote(argv), n) }

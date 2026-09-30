@@ -70,6 +70,11 @@ func (c *cache) sweep(now time.Time) {
 	}
 }
 
+// forget drops one entry.
+func (c *cache) forget(k key) {
+	delete(c.entries, k)
+}
+
 func (c *cache) clear() {
 	c.entries = map[key]entry{}
 }

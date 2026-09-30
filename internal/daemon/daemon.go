@@ -13,11 +13,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/cdmckay/credlock/internal/approve"
+	"github.com/cdmckay/credlock/internal/menubar"
 	"github.com/cdmckay/credlock/internal/platform"
 	"github.com/cdmckay/credlock/internal/proto"
 	"github.com/cdmckay/credlock/internal/provider"
@@ -35,8 +37,17 @@ const (
 	// Sweep is how often expired secrets are dropped.
 	Sweep = time.Minute
 
+	// maxUses is how many deliveries the access log keeps.
+	maxUses = 30
+
 	maxRequest = 1 << 20
 )
+
+// Notifier is told what the helper holds and how it is used, for the menu bar
+// icon: menubar.Bar.
+type Notifier interface {
+	Notify(menubar.Snapshot)
+}
 
 // Server answers client requests.
 type Server struct {
@@ -48,10 +59,16 @@ type Server struct {
 	// Exit ends the helper, for `stop` and the idle timeout. Main's removes
 	// the socket and exits the process.
 	Exit func()
+	// Bar is told what is held and how it is used, after every change. Nil
+	// for none.
+	Bar Notifier
 
-	mu       sync.Mutex // guards cache and lastUsed
+	mu       sync.Mutex // guards everything below
 	cache    *cache
 	lastUsed time.Time
+	names    map[key]string    // the variable each secret was last delivered as
+	labels   map[string]string // how to show each account
+	uses     []menubar.Use     // the access log, newest first
 
 	asking sync.Mutex // one approval at a time, so one request can't hide behind another
 }
@@ -66,6 +83,8 @@ func NewServer(p provider.Provider, a approve.Approver) *Server {
 		Exit:     func() { os.Exit(0) },
 		cache:    newCache(Window, Cap),
 		lastUsed: time.Now(),
+		names:    map[key]string{},
+		labels:   map[string]string{},
 	}
 }
 
@@ -89,6 +108,9 @@ func Main(version string) error {
 	}
 	s := NewServer(&provider.OnePassword{Version: version}, approve.Default(ApprovalTimeout))
 	s.Exit = func() { _ = os.Remove(path); os.Exit(0) }
+	if menubar.Supported {
+		s.Bar = menubar.New(s.act)
+	}
 	go s.reap(time.Tick(Sweep))
 	return s.Serve(ln)
 }
@@ -147,6 +169,7 @@ func (s *Server) reap(ticks <-chan time.Time) {
 		s.cache.sweep(now)
 		idle := now.Sub(s.lastUsed) >= IdleExit
 		s.mu.Unlock()
+		s.notify(false) // times left, and anything that expired
 		if idle {
 			s.Exit()
 			return
@@ -182,6 +205,7 @@ func (s *Server) handle(conn *net.UnixConn) {
 		s.mu.Lock()
 		s.cache.clear()
 		s.mu.Unlock()
+		s.notify(false)
 		reply(conn, proto.Response{})
 	case proto.OpStop:
 		reply(conn, proto.Response{})
@@ -204,6 +228,7 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, peer platform.P
 	}
 
 	values, missing := s.lookup(req)
+	asked := false
 	if len(missing) > 0 {
 		// One dialog at a time. Look again once it is our turn: the request
 		// ahead of us may have been approved for the same secrets.
@@ -212,6 +237,7 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, peer platform.P
 		values, missing = s.lookup(req)
 	}
 	if len(missing) > 0 {
+		asked = true
 		ok, err := s.Approver.Approve(ctx, approve.Request{
 			Reason:    req.Reason,
 			Command:   req.Command,
@@ -246,15 +272,102 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, peer platform.P
 		s.mu.Unlock()
 	}
 
-	// Delivered: slide every secret this request used.
+	// Delivered: slide every secret this request used, and log it.
 	s.mu.Lock()
 	now := s.Now()
 	for ref := range values {
 		s.cache.touch(key{req.Account, ref}, now)
 	}
 	s.lastUsed = now
+	s.logUse(req, asked, now)
 	s.mu.Unlock()
+	s.notify(true)
 	return proto.Response{Values: values}
+}
+
+// logUse records a delivery in the access log, and the names it used. The
+// caller holds s.mu.
+func (s *Server) logUse(req proto.Request, asked bool, now time.Time) {
+	s.labels[req.Account] = firstNonEmpty(req.AccountLabel, req.Account)
+	seen := map[string]bool{}
+	var names []string
+	for _, sec := range req.Secrets {
+		s.names[key{req.Account, sec.Ref}] = sec.Name
+		if n := approve.Clean(sec.Name, 60); !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	use := menubar.Use{
+		At:      now.Format("15:04"),
+		Command: approve.CommandLine(req.Command, 80),
+		Reason:  approve.Clean(req.Reason, 120),
+		Names:   names,
+		Cached:  !asked,
+	}
+	s.uses = append([]menubar.Use{use}, s.uses...)
+	if len(s.uses) > maxUses {
+		s.uses = s.uses[:maxUses]
+	}
+}
+
+// notify tells the menu bar what is held now. read means secrets were just
+// handed out. Never a value: only names, references and times.
+func (s *Server) notify(read bool) {
+	if s.Bar == nil {
+		return
+	}
+	s.mu.Lock()
+	now := s.Now()
+	snap := menubar.Snapshot{Read: read, Uses: append([]menubar.Use(nil), s.uses...)}
+	for _, e := range s.cache.list(now) {
+		k := key{e.Account, e.Ref}
+		snap.Held = append(snap.Held, menubar.Held{
+			AccountID: e.Account,
+			Account:   approve.Clean(firstNonEmpty(s.labels[e.Account], e.Account), 100),
+			Name:      approve.Clean(firstNonEmpty(s.names[k], e.Ref), 60),
+			Ref:       approve.Clean(e.Ref, 200),
+			Left:      left(time.Duration(e.ExpiresIn) * time.Second),
+		})
+	}
+	s.mu.Unlock()
+	sort.SliceStable(snap.Held, func(i, j int) bool {
+		if snap.Held[i].Account != snap.Held[j].Account {
+			return snap.Held[i].Account < snap.Held[j].Account
+		}
+		return snap.Held[i].Name < snap.Held[j].Name
+	})
+	s.Bar.Notify(snap)
+}
+
+// act does what was chosen in the menu bar. Each action takes access away.
+func (s *Server) act(a menubar.Action) {
+	switch a.Op {
+	case menubar.OpForget:
+		s.mu.Lock()
+		s.cache.forget(key{a.AccountID, a.Ref})
+		s.mu.Unlock()
+		s.notify(false)
+	case menubar.OpForgetAll:
+		s.mu.Lock()
+		s.cache.clear()
+		s.mu.Unlock()
+		s.notify(false)
+	case menubar.OpStop:
+		s.Exit()
+	}
+}
+
+// left renders the time an approval has left: "48 min left".
+func left(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "under a minute left"
+	case d <= time.Hour:
+		return fmt.Sprintf("%d min left", int((d+time.Minute-1)/time.Minute))
+	default:
+		return fmt.Sprintf("%d h %d min left", int(d/time.Hour), int(d%time.Hour/time.Minute))
+	}
 }
 
 // lookup splits a request into what is already approved and what is not.
