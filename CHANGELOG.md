@@ -7,6 +7,8 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-30
+
 ### Added
 
 - A menu bar icon shows a key and the number of secrets credlock is holding.
@@ -45,5 +47,6 @@ The first release. macOS only.
 - A Nix flake, and a Homebrew formula in
   [cdmckay/homebrew-tap](https://github.com/cdmckay/homebrew-tap).
 
-[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/cdmckay/credlock/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cdmckay/credlock/releases/tag/v0.1.0
