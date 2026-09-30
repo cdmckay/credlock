@@ -50,12 +50,15 @@ between them compatible within a major version, or say in the changelog that
    sets `VERSION`, checks the result with `scripts/check-release.sh`, and
    commits it on a new branch, `release/v0.2.0`. It pushes nothing.
 
-2. **Review.** Push the branch and open a pull request. Merge it once CI
-   passes.
+2. **Review.** Push the branch and open a pull request. Its diff only dates
+   the changelog, so give it the release notes and the pull requests since the
+   last release as its description. Read the notes as the release will show
+   them, check they still describe what shipped, and merge once CI passes.
 
    ```bash
    git push -u origin release/v0.2.0
-   gh pr create --fill --base main
+   gh pr create --base main --title "Release 0.2.0" \
+     --body-file <(scripts/release-notes.sh 0.2.0 --pr)
    ```
 
 3. **Tag.** Tag the commit that landed on `main`, and push the tag:

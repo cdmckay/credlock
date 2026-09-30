@@ -1,6 +1,6 @@
 // Package menubar is credlock's menu bar icon: a key with the number of
-// secrets the helper holds, which turns into an eye while secrets are being
-// read. Its menu is the access log, the held secrets, and ways to forget them.
+// secrets the helper holds, with an orange dot on the key while secrets are
+// being read. Its menu is the access log, the held secrets, and ways to forget them.
 //
 // The icon runs as a child of the helper, `credlock __menubar`, because AppKit
 // needs a main thread. The helper writes Snapshots to its stdin, one JSON line
@@ -24,7 +24,7 @@ const Command = "__menubar"
 type Snapshot struct {
 	Held []Held `json:"held"`
 	Uses []Use  `json:"uses"` // newest first
-	// Read means secrets were just handed out: show the eye for a moment.
+	// Read means secrets were just handed out: show the dot for a moment.
 	Read bool `json:"read,omitempty"`
 }
 
@@ -79,7 +79,7 @@ func New(onAction func(Action)) *Bar {
 }
 
 // Notify shows s. Snapshots that arrive faster than the icon takes them are
-// merged: the last one wins, but a read in any of them still shows the eye.
+// merged: the last one wins, but a read in any of them still shows the dot.
 func (b *Bar) Notify(s Snapshot) {
 	b.mu.Lock()
 	if b.pending != nil && b.pending.Read {

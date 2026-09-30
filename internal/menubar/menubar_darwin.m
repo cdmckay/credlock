@@ -1,17 +1,17 @@
-// The menu bar icon: a key and the number of secrets held, turning into an eye
-// for a few seconds whenever secrets are read. menubar_darwin.go feeds it
+// The menu bar icon: a key and the number of secrets held, with an orange dot
+// on the key for a few seconds whenever secrets are read. menubar_darwin.go feeds it
 // snapshots; the menu's actions go back through credlockMenubarAction.
 
 #import <Cocoa/Cocoa.h>
 #include "_cgo_export.h"
 #include "menubar_darwin.h"
 
-static const NSTimeInterval kEyeSeconds = 4;  // how long the eye stays after the last read
+static const NSTimeInterval kDotSeconds = 4;  // how long the dot stays after the last read
 static const NSUInteger kLogItems = 20;       // uses shown in the menu
 
 static NSStatusItem *item;
 static NSMenu *menu;
-static NSTimer *eyeTimer;
+static NSTimer *dotTimer;
 static NSUInteger heldCount;
 
 static NSString *str(id d, NSString *key) {
@@ -108,28 +108,28 @@ static NSImage *iconImage(BOOL reading) {
                  }];
 }
 
-static void showIcon(BOOL eye) {
-  NSString *what = eye ? @"credlock: secrets are being read" : @"credlock";
-  NSImage *img = iconImage(eye);
+static void showIcon(BOOL reading) {
+  NSString *what = reading ? @"credlock: secrets are being read" : @"credlock";
+  NSImage *img = iconImage(reading);
   img.accessibilityDescription = what;
   item.button.image = img;
   item.button.title = [NSString stringWithFormat:@"%lu", (unsigned long)heldCount];
   item.button.toolTip = [NSString stringWithFormat:@"credlock: %lu secret%@ held%@", (unsigned long)heldCount,
-                                                   heldCount == 1 ? @"" : @"s", eye ? @", being read now" : @""];
+                                                   heldCount == 1 ? @"" : @"s", reading ? @", being read now" : @""];
 }
 
-// showRead shows the eye, and keeps it up until kEyeSeconds after the last read.
+// showRead shows the dot, and keeps it up until kDotSeconds after the last read.
 static void showRead(void) {
-  [eyeTimer invalidate];
+  [dotTimer invalidate];
   showIcon(YES);
-  eyeTimer = [NSTimer timerWithTimeInterval:kEyeSeconds
+  dotTimer = [NSTimer timerWithTimeInterval:kDotSeconds
                                     repeats:NO
                                       block:^(NSTimer *t) {
-                                        eyeTimer = nil;
+                                        dotTimer = nil;
                                         showIcon(NO);
                                       }];
-  // Common modes, so the eye goes back even while the menu is open.
-  [[NSRunLoop mainRunLoop] addTimer:eyeTimer forMode:NSRunLoopCommonModes];
+  // Common modes, so the dot goes away even while the menu is open.
+  [[NSRunLoop mainRunLoop] addTimer:dotTimer forMode:NSRunLoopCommonModes];
 }
 
 #pragma mark - The menu
@@ -260,7 +260,7 @@ static void apply(NSDictionary *v) {
   if (isRead && heldCount > 0) {
     showRead();
   } else {
-    showIcon(eyeTimer != nil);
+    showIcon(dotTimer != nil);
   }
 }
 
