@@ -7,15 +7,18 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-30
+
 ### Added
 
 - A menu bar icon shows a key and the number of secrets credlock is holding.
-  It turns into an eye for a few seconds whenever secrets are read, so a
-  cached secret can't be used without your seeing it. Clicking it shows the
-  access log (when, which command and why, which secrets, and whether they came
-  from the cache), the held secrets with the time each has left, and ways to
-  forget one secret, forget them all, or stop credlock. The icon never sees a
-  secret's value, and nothing in its menu can approve anything.
+  An orange dot appears on the key for a few seconds whenever secrets are
+  read, so a cached secret can't be used without your seeing it. Clicking it
+  shows the access log (when, which command and why, which secrets, and
+  whether they came from the cache), the held secrets with the time each has
+  left, and ways to forget one secret, forget them all, or stop credlock. The
+  icon never sees a secret's value, and nothing in its menu can approve
+  anything.
 
 ## [0.1.0] - 2026-09-29
 
@@ -45,5 +48,6 @@ The first release. macOS only.
 - A Nix flake, and a Homebrew formula in
   [cdmckay/homebrew-tap](https://github.com/cdmckay/homebrew-tap).
 
-[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/cdmckay/credlock/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cdmckay/credlock/releases/tag/v0.1.0

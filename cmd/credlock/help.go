@@ -17,8 +17,8 @@ Other commands
   status, clear and stop talk to the helper, a per-user background process
   that credlock starts on first use and that exits after an idle hour. It
   keeps approved values in memory only. While it holds any, a key in the
-  menu bar shows how many, and turns into an eye whenever they are read; its
-  menu is the access log.
+  menu bar shows how many, and gets an orange dot whenever they are read;
+  its menu is the access log.
 `
 
 // runHelp is `credlock run --help`.

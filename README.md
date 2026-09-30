@@ -75,7 +75,7 @@ account the SDK calls it `Personal` (`op` also takes `Private`), while in
   lapsed, after ten idle minutes.
 - The client then replaces itself with the command, holding the secrets.
 - While the helper holds secrets, a key in the menu bar shows how many. It
-  turns into an eye for a few seconds whenever secrets are read, cached or
+  gets an orange dot for a few seconds whenever secrets are read, cached or
   not. Its menu is the access log, the held secrets with the time each has
   left, and Forget and Stop. It runs as another child of the helper, and is
   sent names, references and times, never values.

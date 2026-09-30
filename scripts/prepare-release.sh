@@ -41,6 +41,7 @@ git commit --quiet -m "Release $version"
 cat <<MSG
 Prepared release $version on branch release/v$version. Next:
   git push -u origin release/v$version
-  gh pr create --fill --base main
-Once it's merged, tag the merge commit and push the tag (RELEASING.md, step 3).
+  gh pr create --base main --title "Release $version" --body-file <(scripts/release-notes.sh $version --pr)
+Read the notes in that pull request before merging it. Once it's merged, tag
+the merge commit and push the tag (RELEASING.md, step 3).
 MSG
