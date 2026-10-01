@@ -81,17 +81,27 @@ between them compatible within a major version, or say in the changelog that
    [cdmckay/homebrew-tap](https://github.com/cdmckay/homebrew-tap). Its
    autobump workflow checks for a new release every day and opens a pull
    request that updates the formula's URL and checksum. To do it straight
-   away, open that pull request yourself:
+   away, start the workflow yourself:
 
    ```bash
-   HOMEBREW_GITHUB_API_TOKEN=$(gh auth token --user cdmckay) \
-     brew bump-formula-pr --no-fork --version 0.2.0 cdmckay/tap/credlock
+   GH_TOKEN=$(gh auth token --user cdmckay) \
+     gh workflow run autobump.yml --repo cdmckay/homebrew-tap
    ```
 
-   The tap's tests build and test the formula on the pull request. A pull
-   request opened by the autobump workflow does not start them (GitHub doesn't
-   run workflows for its own token's pull requests), so close and reopen it
-   to run them. Merge once they pass.
+   GitHub doesn't run workflows for pull requests its own token opened, so
+   the tap's tests don't start on their own. Close and reopen the pull request
+   to run them:
+
+   ```bash
+   gh pr close N --repo cdmckay/homebrew-tap && gh pr reopen N --repo cdmckay/homebrew-tap
+   ```
+
+   Check that the diff moves the URL to the new tag, and merge once the tests
+   pass. `brew bump-formula-pr` works too, but only once the tap is trusted
+   locally (`brew tap cdmckay/tap`, then
+   `brew trust --formula cdmckay/tap/credlock`): Homebrew won't load a
+   formula from a tap that was only added. Installing by full name, as
+   users do, trusts that formula on its own.
 
 5. **Nix.** The flake needs nothing: a build reports the last release plus the
    commit it came from, like `0.2.0+1a2b3c4`. Machines that pin credlock
