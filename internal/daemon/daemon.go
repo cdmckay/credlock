@@ -106,7 +106,9 @@ func Main(version string) error {
 	if err != nil {
 		return err
 	}
-	s := NewServer(&provider.OnePassword{Version: version}, approve.Default(ApprovalTimeout))
+	// One resolver process per account: the 1Password SDK can only reach one
+	// account per process (cdmckay/credlock#8).
+	s := NewServer(&provider.Isolated{Version: version}, approve.Default(ApprovalTimeout))
 	s.Exit = func() { _ = os.Remove(path); os.Exit(0) }
 	if menubar.Supported {
 		s.Bar = menubar.New(s.act)

@@ -13,6 +13,7 @@ import (
 	"github.com/cdmckay/credlock/internal/daemon"
 	"github.com/cdmckay/credlock/internal/menubar"
 	"github.com/cdmckay/credlock/internal/proto"
+	"github.com/cdmckay/credlock/internal/provider"
 )
 
 // version is set at build time with -ldflags "-X main.version=…", as the Nix
@@ -64,6 +65,8 @@ func dispatch(cmd string, args []string) int {
 		return approve.WindowMain(os.Stdin, os.Stdout)
 	case menubar.Command:
 		return menubar.Main(os.Stdin, os.Stdout)
+	case provider.ResolverCommand:
+		return provider.ResolverMain(args, currentVersion(), os.Stdin, os.Stdout)
 	case "help", "-h", "--help":
 		if len(args) > 0 && args[0] == "run" {
 			fmt.Print(runHelp)

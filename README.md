@@ -70,9 +70,13 @@ account the SDK calls it `Personal` (`op` also takes `Private`), while in
   clicks for its first second on screen, so a click meant for another window
   can't land on it. A window left unanswered for two minutes counts as a
   denial, and one that fails or crashes never counts as Allow.
-- On Allow, it resolves every missing reference in one `ResolveAll` call. The
-  1Password app shows its own approval only when its session for the helper has
-  lapsed, after ten idle minutes.
+- On Allow, it resolves every missing reference in one `ResolveAll` call, in a
+  resolver process for that account. The 1Password SDK can reach only one
+  account per process, so each account the helper uses gets its own
+  ([#8](https://github.com/cdmckay/credlock/issues/8)). The 1Password app
+  shows its own approval only when its session for a resolver has lapsed,
+  after ten idle minutes. A resolver that doesn't answer within three minutes,
+  as when 1Password is locked, is stopped and replaced.
 - The client then replaces itself with the command, holding the secrets.
 - While the helper holds secrets, a key in the menu bar shows how many. It
   gets an orange dot for a few seconds whenever secrets are read, cached or
