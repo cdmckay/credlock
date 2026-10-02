@@ -7,6 +7,19 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- A request for a second 1Password account went to the first account the
+  helper had used, because the 1Password SDK connects to the app once per
+  process ([#8](https://github.com/cdmckay/credlock/issues/8)). The approval
+  window named the account asked for while the secret came from the other,
+  and when the other account had no such reference the request failed. Each
+  account is now resolved in its own process, so several accounts work side by
+  side.
+- A request no longer waits forever when 1Password doesn't answer, as when the
+  app is locked: after three minutes it fails, and the next request starts
+  afresh.
+
 ## [0.2.0] - 2026-09-30
 
 ### Added
