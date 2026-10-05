@@ -56,44 +56,42 @@ approval window, fetches from 1Password, and sends the values back over the
 tailnet. The other machine keeps nothing; every run asks again, and a Mac
 that holds an approval for it answers without a window.
 
-On each machine, `~/.config/credlock/config.toml` (or the file
-`$CREDLOCK_CONFIG` names) says what it does:
+1. **On the Mac:** `credlock hub on`. It remembers the tailnet the Mac is on,
+   listens only there, and adds a login item, so it keeps answering after a
+   restart. `credlock hub status` lists the machines paired with it, and
+   `credlock hub off` stops it.
+2. **On the other machine:** `credlock pair potato`, naming the Mac. The Mac
+   shows a pairing window with a four-digit code, the terminal shows the
+   same code, and Allow pairs them. From then on `credlock run` just works
+   there. (Or set `[client] hubs = ["potato"]` in `~/.config/credlock/config.toml`,
+   and the first request pairs in its own window.)
 
-```toml
-# On the machine without 1Password: the Macs to ask, all at once.
-[client]
-hubs = ["potato", "tomato"]
+How it's kept safe:
 
-# On a Mac: the tailnet it serves, and the machines on it that it answers.
-# Each caller is checked with `tailscale whois`, so a machine can't claim to
-# be another.
-[hub]
-tailnet = "example.org"
-allow = ["papaya", "banana"]
-```
-
-- **Every hub is asked at once.** First credlock asks each hub only for what
-  it already holds. If one does, that answer is used, and no window opens
-  anywhere. Otherwise every hub shows its window, and the first Allow or Deny
-  wins; the other windows close. A hub that's offline, or whose window nobody
-  answers, doesn't count.
-- **Approvals are kept per machine.** What you allow for papaya is papaya's
-  alone, and nothing this Mac approved for itself is served to papaya. The
-  window, the menu bar and `credlock status` say which machine each is for.
-- **A hub listens only on its Tailscale addresses**, port 7177 by default
-  (`port` under `[hub]`), and serves nothing there but resolving. It stays
-  running instead of idling out, since another machine may ask at any time.
-- **A name only counts on its own tailnet.** The hub listens only while the
-  Mac is on the tailnet named in `tailnet`, as `tailscale switch --list`
-  shows it, and a caller's full Tailscale name must be in that tailnet's
-  domain. On another tailnet, anyone could have a device called "papaya".
-- **Account names are resolved on the hub,** since the other machine has no
-  `op`. The hub asks `op` for its account list once and keeps it. While
-  1Password is locked, `op` can't list accounts, so a hub that hasn't got the
-  list yet accepts only an account ID.
-- **Tailscale identifies machines, not people.** Any process on papaya can
-  ask as papaya. New secrets still need your click, but what you've approved
-  for papaya is served to it for the hour.
+- **Tailscale says which machine is asking**, and the hub only listens on
+  the tailnet it was turned on in. A caller's full Tailscale name must be in
+  that tailnet, so a device elsewhere can't pass for one of yours.
+- **A key says which user is asking.** credlock makes one for each user on
+  the other machine, readable only by them, in `~/.local/state/credlock`, and
+  every request signs a fresh challenge with it. Another user there can't
+  ask in your name; they'd get a pairing window naming them, with a code
+  only their own terminal shows.
+- **A key that doesn't match is refused, and the Mac's menu bar key turns
+  red** with an alert, since a reinstall has no key at all: something else
+  is asking in that machine's name. Re-pair on purpose: `credlock hub forget
+  papaya` on the Mac, then `credlock pair` again.
+- **Five denied pairing requests from one machine** refuse its pairing
+  requests for an hour, so a window can't be put up again and again until
+  it's allowed out of habit.
+- **Approvals are kept per user and machine.** What you allow for papaya is
+  papaya's alone, and nothing the Mac approved for itself is served to it.
+  The window says first, in a card of its own, which machine is asking.
+- **The hub serves only pairing and resolving** over the tailnet, and
+  refuses its own Mac there: local requests use the local socket, where the
+  kernel says which user is asking.
+- **What it can't stop:** root on the other machine, or other programs
+  running as you there, can use your key. New secrets still need your
+  click, and every use shows in the menu bar.
 
 ## Commands
 

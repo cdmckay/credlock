@@ -1,7 +1,6 @@
 // Package config reads credlock's settings, from ~/.config/credlock/config.toml
-// unless $CREDLOCK_CONFIG names another file. A machine with no file has no
-// hubs and serves none: the settings only matter for asking or serving across
-// the tailnet.
+// unless $CREDLOCK_CONFIG names another file. No setting is needed: they only
+// pin what credlock otherwise works out for itself.
 package config
 
 import (
@@ -20,30 +19,18 @@ import (
 // DefaultPort is the tailnet port a hub listens on, and clients ask.
 const DefaultPort = 7177
 
-// Config is the whole file.
+// Config is the whole file. Nothing in it is needed: it pins what credlock
+// would otherwise work out for itself.
 type Config struct {
 	Client Client `toml:"client"`
-	Hub    Hub    `toml:"hub"`
 }
 
 // Client is for a machine without 1Password, which asks hubs for secrets.
 type Client struct {
-	// Hubs are the tailnet hosts to ask, e.g. "potato", or "potato:7177". All
-	// are asked at once.
+	// Hubs are the tailnet hosts to ask, e.g. "potato", or "potato:7177", in
+	// place of the hubs this machine has paired with or finds on the tailnet.
+	// All are asked at once.
 	Hubs []string `toml:"hubs"`
-}
-
-// Hub is for a Mac that resolves secrets for other machines on the tailnet.
-type Hub struct {
-	// Tailnet is the tailnet the names in Allow belong to, e.g. "cdmckay.org".
-	// The hub serves only while this Mac is on it: a name means nothing on
-	// another tailnet, where anyone could have a device called "papaya".
-	Tailnet string `toml:"tailnet"`
-	// Allow is every tailnet host that may ask, by its Tailscale name. A hub
-	// with none listens only on its local socket.
-	Allow []string `toml:"allow"`
-	// Port is where it listens on its Tailscale addresses; DefaultPort if 0.
-	Port int `toml:"port"`
 }
 
 // Path is where the settings are read from.
@@ -84,21 +71,7 @@ func Load() (Config, error) {
 		}
 		return Config{}, fmt.Errorf("%s: unknown setting %s", path, strings.Join(keys, ", "))
 	}
-	if len(c.Hub.Allow) > 0 && c.Hub.Tailnet == "" {
-		return Config{}, fmt.Errorf(`%s: hub.allow needs hub.tailnet, the tailnet those names belong to (e.g. tailnet = "cdmckay.org", as 'tailscale switch --list' shows it)`, path)
-	}
-	if c.Hub.Port < 0 || c.Hub.Port > 65535 {
-		return Config{}, fmt.Errorf("%s: hub.port %d is not a port", path, c.Hub.Port)
-	}
 	return c, nil
-}
-
-// ListenPort is the hub's port.
-func (h Hub) ListenPort() int {
-	if h.Port == 0 {
-		return DefaultPort
-	}
-	return h.Port
 }
 
 // Addr is a hub's address: the host as given, with DefaultPort unless it

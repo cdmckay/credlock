@@ -11,6 +11,16 @@ const (
 	OpStatus  = "status"
 	OpClear   = "clear"
 	OpStop    = "stop"
+	OpHub     = "hub"  // hub mode: Hub says what to do
+	OpPair    = "pair" // over the tailnet: pair this machine user with the hub
+)
+
+// Hub mode actions, for OpHub.
+const (
+	HubStatus = "status"
+	HubOn     = "on"
+	HubOff    = "off"
+	HubForget = "forget" // unpair Host
 )
 
 // Secret is one environment variable the client wants filled in.
@@ -35,6 +45,31 @@ type Request struct {
 	// hubs uses it first, so a hub that holds the secrets answers before any
 	// window opens elsewhere.
 	NoPrompt bool `json:"no_prompt,omitempty"`
+
+	// From another machine: who it says it is, and proof it holds the key it
+	// sends, as a signature over the hub's challenge.
+	Key   string `json:"key,omitempty"`
+	User  string `json:"user,omitempty"`
+	Proof string `json:"proof,omitempty"`
+
+	// For OpHub.
+	Hub  string `json:"hub,omitempty"`
+	Host string `json:"host,omitempty"`
+}
+
+// HubInfo is hub mode as `credlock hub status` shows it.
+type HubInfo struct {
+	Enabled   bool       `json:"enabled"`
+	Tailnet   string     `json:"tailnet,omitempty"`
+	Listening []string   `json:"listening,omitempty"`
+	Peers     []PeerInfo `json:"peers,omitempty"`
+}
+
+// PeerInfo is one paired machine user.
+type PeerInfo struct {
+	Host     string `json:"host"`
+	User     string `json:"user"`
+	PairedAt string `json:"paired_at"`
 }
 
 // Entry describes one approved secret for `credlock status`. It never carries
@@ -57,5 +92,11 @@ type Response struct {
 	NotHeld bool    `json:"not_held,omitempty"`
 	Error   string  `json:"error,omitempty"`
 	Entries []Entry `json:"entries,omitempty"`
-	PID     int     `json:"pid,omitempty"`
+	// Challenge is the first thing a hub sends another machine: random bytes
+	// to sign with its key.
+	Challenge string `json:"challenge,omitempty"`
+	// Paired answers OpPair: this machine user is paired with the hub.
+	Paired bool     `json:"paired,omitempty"`
+	Hub    *HubInfo `json:"hub,omitempty"`
+	PID    int      `json:"pid,omitempty"`
 }

@@ -26,6 +26,16 @@ type Snapshot struct {
 	Uses []Use  `json:"uses"` // newest first
 	// Read means secrets were just handed out: show the dot for a moment.
 	Read bool `json:"read,omitempty"`
+	// Alerts are things the person should look at, such as a machine asking
+	// with a key it didn't pair with. The key turns red until they're
+	// dismissed.
+	Alerts []Alert `json:"alerts,omitempty"`
+}
+
+// Alert is one thing to look at.
+type Alert struct {
+	At   string `json:"at"` // e.g. "14:02"
+	Text string `json:"text"`
 }
 
 // Held is one approved secret.
@@ -63,6 +73,7 @@ const (
 	OpForget    = "forget"     // forget one secret
 	OpForgetAll = "forget_all" // forget every secret
 	OpStop      = "stop"       // stop the helper
+	OpDismiss   = "dismiss"    // dismiss the alerts
 )
 
 // Bar keeps the icon process showing the latest snapshot. It starts the
@@ -91,7 +102,7 @@ func (b *Bar) Notify(s Snapshot) {
 	}
 	b.pending = &s
 	if b.wake == nil {
-		if len(s.Held) == 0 {
+		if len(s.Held) == 0 && len(s.Alerts) == 0 {
 			// Nothing to show yet: don't start an icon just to hide it.
 			b.pending = nil
 			b.mu.Unlock()
@@ -126,7 +137,7 @@ func (b *Bar) run() {
 		// hasn't been noticed yet: the send fails, and a new one gets it.
 		for range 2 {
 			if c == nil || c.dead() {
-				if len(s.Held) == 0 {
+				if len(s.Held) == 0 && len(s.Alerts) == 0 {
 					break // nothing to show: don't start one just to hide it
 				}
 				var err error
@@ -211,7 +222,7 @@ func (a Action) valid() bool {
 	switch a.Op {
 	case OpForget:
 		return a.AccountID != "" && a.Ref != ""
-	case OpForgetAll, OpStop:
+	case OpForgetAll, OpStop, OpDismiss:
 		return true
 	}
 	return false

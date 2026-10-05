@@ -415,9 +415,13 @@ static CLWindow *build(NSDictionary *v, int timeout) {
   // can produce.
   NSView *origin = nil;
   if (str(v, @"origin").length) {
+    // Blue for a paired machine, purple for a first pairing.
+    BOOL pairing = [str(v, @"origin_tone") isEqualToString:@"pair"];
+    NSColor *colour = pairing ? NSColor.systemPurpleColor : NSColor.systemBlueColor;
+    NSString *icon = pairing ? @"link" : @"network";
     CGFloat words = kCardInner - 42 - kIconGap;
-    origin = card(NSColor.systemBlueColor, hstack(@[
-                    badge(@"network", 42, NSColor.systemBlueColor, YES),
+    origin = card(colour, hstack(@[
+                    badge(icon, 42, colour, YES),
                     vstack(@[
                       text(str(v, @"origin_title"), sys(15, NSFontWeightSemibold), NSColor.labelColor, words),
                       text(str(v, @"origin_note"), sys(12, NSFontWeightRegular), NSColor.secondaryLabelColor, words),
@@ -495,7 +499,8 @@ static CLWindow *build(NSDictionary *v, int timeout) {
     [secretsParts addObject:text(str(v, @"approved"), sys(12, NSFontWeightRegular), NSColor.secondaryLabelColor,
                                  kCardInner)];
   }
-  NSView *secrets = card(NSColor.systemGreenColor, vstack(secretsParts, 16));
+  // A pairing on its own has no secrets: no card for them.
+  NSView *secrets = list.count ? card(NSColor.systemGreenColor, vstack(secretsParts, 16)) : nil;
 
   // The answer.
   CGFloat buttonWidth = (kInner - 16) / 2;
@@ -522,11 +527,15 @@ static CLWindow *build(NSDictionary *v, int timeout) {
   if (origin) {
     [blocks addObject:origin];
   }
-  [blocks addObjectsFromArray:@[ question, reason, details, secrets, buttons, footer ]];
+  [blocks addObjectsFromArray:@[ question, reason, details ]];
+  if (secrets) {
+    [blocks addObject:secrets];
+  }
+  [blocks addObjectsFromArray:@[ buttons, footer ]];
   NSStackView *root = vstack(blocks, kSection);
   [root setCustomSpacing:20 afterView:header];
   [root setCustomSpacing:18 afterView:question];
-  [root setCustomSpacing:28 afterView:secrets];
+  [root setCustomSpacing:28 afterView:secrets ?: details];
   [root setCustomSpacing:16 afterView:buttons];
   root.edgeInsets = NSEdgeInsetsMake(kMargin + 4, kMargin, kMargin - 6, kMargin);
   fixWidth(root, kWidth);

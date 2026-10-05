@@ -20,11 +20,11 @@ import (
 
 	"github.com/cdmckay/credlock/internal/approve"
 	"github.com/cdmckay/credlock/internal/client"
-	"github.com/cdmckay/credlock/internal/config"
 	"github.com/cdmckay/credlock/internal/menubar"
 	"github.com/cdmckay/credlock/internal/platform"
 	"github.com/cdmckay/credlock/internal/proto"
 	"github.com/cdmckay/credlock/internal/provider"
+	"github.com/cdmckay/credlock/internal/state"
 )
 
 const (
@@ -73,14 +73,32 @@ type Server struct {
 	// the cache can answer mustn't.
 	Accounts func() []client.Account
 
-	// allow is every tailnet host that may ask, in lower case. A helper with
-	// any serves the tailnet as a hub, and stays up instead of idling out.
-	allow map[string]bool
+	// Tailnet reports this Mac's Tailscale state: tailscaleStatus, unless a
+	// test fakes it.
+	Tailnet func() (tailnetState, error)
+	// SaveHub stores hub mode: state.Hub.Save, unless a test keeps it in
+	// memory.
+	SaveHub func(state.Hub) error
+
+	// hub is hub mode: whether this Mac answers other machines on its tailnet,
+	// and who is paired. A hub stays up instead of idling out.
+	hub state.Hub
+	// hubWake tells the tailnet listener to look again now, after hub mode
+	// changes, instead of at its next tick.
+	hubWake chan struct{}
+	// listening is where the hub listens now, for `credlock hub status`.
+	listening []string
 	// suffix is the MagicDNS domain of the tailnet the hub serves, while it
-	// serves one; callers must be in it.
-	suffix string
+	// serves one; callers must be in it. self is this Mac's own name there,
+	// which the hub refuses: local requests use the local socket.
+	suffix, self string
 	// known is the account list, once Accounts has given one.
 	known []client.Account
+	// alerts are what the person should look at, newest first; the menu bar
+	// key turns red until they are dismissed.
+	alerts []menubar.Alert
+	// denials counts denied pairing requests by machine, for the cooldown.
+	denials map[string]*pairingDenials
 
 	mu       sync.Mutex // guards everything below
 	cache    *cache
@@ -105,6 +123,9 @@ func NewServer(p provider.Provider, a approve.Approver) *Server {
 		names:    map[key]string{},
 		labels:   map[string]string{},
 		Accounts: func() []client.Account { return client.AccountsWithin(5 * time.Second) },
+		Tailnet:  tailscaleStatus,
+		SaveHub:  state.Hub.Save,
+		hubWake:  make(chan struct{}, 1),
 	}
 	s.Identify = s.identify
 	return s
@@ -135,14 +156,14 @@ func Main(version string) error {
 	if menubar.Supported {
 		s.Bar = menubar.New(s.act)
 	}
-	// A broken config must not stop the helper serving this Mac, so it is
-	// reported and the tailnet left alone. `credlock run` reports it too.
-	if cfg, err := config.Load(); err != nil {
-		fmt.Fprintln(os.Stderr, "credlock helper:", err)
-	} else if len(cfg.Hub.Allow) > 0 {
-		s.Allow(cfg.Hub.Allow)
-		go s.serveTailnet(cfg.Hub, time.Tick(time.Minute))
+	// Hub mode, as `credlock hub on` left it. Unreadable state must not stop
+	// the helper serving this Mac, so it is reported and hub mode left off.
+	if hub, err := state.LoadHub(); err != nil {
+		fmt.Fprintln(os.Stderr, "credlock helper: hub mode is off:", err)
+	} else {
+		s.hub = hub
 	}
+	go s.serveTailnet(time.Tick(time.Minute))
 	go s.reap(time.Tick(Sweep))
 	return s.Serve(ln)
 }
@@ -200,7 +221,7 @@ func (s *Server) reap(ticks <-chan time.Time) {
 		s.mu.Lock()
 		now := s.Now()
 		s.cache.sweep(now)
-		idle := now.Sub(s.lastUsed) >= IdleExit && len(s.allow) == 0
+		idle := now.Sub(s.lastUsed) >= IdleExit && !s.hub.Enabled
 		s.mu.Unlock()
 		s.notify(false) // times left, and anything that expired
 		if idle {
@@ -231,7 +252,9 @@ func (s *Server) handle(conn *net.UnixConn) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		go watchHangup(conn, cancel)
-		reply(conn, s.resolve(ctx, req, "", fmt.Sprintf("this Mac: %s (pid %d)", peer.Name, peer.PID)))
+		reply(conn, s.resolve(ctx, req, asker{requester: fmt.Sprintf("this Mac: %s (pid %d)", peer.Name, peer.PID)}))
+	case proto.OpHub:
+		reply(conn, s.hubOp(req))
 	case proto.OpStatus:
 		s.mu.Lock()
 		entries := s.cache.list(s.Now())
@@ -254,10 +277,10 @@ func (s *Server) handle(conn *net.UnixConn) {
 // resolve answers a request from what is already approved, and asks about the
 // rest before fetching it all from the provider in one call.
 //
-// origin is who the approval is for: "" for this machine, or the tailnet host
-// that asked. requester is how the window names the asker. ctx ends when the
-// asker hangs up, which closes a window still waiting for an answer.
-func (s *Server) resolve(ctx context.Context, req proto.Request, origin, requester string) proto.Response {
+// from is who asks; ctx ends when they hang up, which closes a window still
+// waiting for an answer.
+func (s *Server) resolve(ctx context.Context, req proto.Request, from asker) proto.Response {
+	origin := from.origin
 	if len(req.Secrets) == 0 {
 		return proto.Response{Error: "no secrets requested"}
 	}
@@ -271,13 +294,20 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, origin, request
 	if len(missing) > 0 && req.NoPrompt {
 		return proto.Response{NotHeld: true}
 	}
+	if from.pairing != "" {
+		// An unpaired caller always sees the window, even for what its
+		// origin may still hold from a key it no longer has.
+		values, missing = map[string]string{}, req.Secrets
+	}
 	asked := false
 	if len(missing) > 0 {
 		// One dialog at a time. Look again once it is our turn: the request
 		// ahead of us may have been approved for the same secrets.
 		s.asking.Lock()
 		defer s.asking.Unlock()
-		values, missing = s.lookup(req, origin)
+		if from.pairing == "" {
+			values, missing = s.lookup(req, origin)
+		}
 	}
 	if len(missing) > 0 {
 		asked = true
@@ -285,8 +315,10 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, origin, request
 			Reason:    req.Reason,
 			Command:   req.Command,
 			Cwd:       req.Cwd,
-			Requester: requester,
-			Origin:    origin,
+			Requester: from.requester,
+			Origin:    from.host,
+			Pairing:   from.pairing,
+			Code:      from.code,
 			Account:   firstNonEmpty(req.AccountLabel, req.Account),
 			Secrets:   missing,
 			Approved:  len(uniqueRefs(req.Secrets)) - len(uniqueRefs(missing)),
@@ -304,6 +336,11 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, origin, request
 		}
 		if !ok {
 			return proto.Response{Denied: true}
+		}
+		if from.pair != nil {
+			if err := from.pair(); err != nil {
+				return proto.Response{Error: "pairing: " + err.Error()}
+			}
 		}
 		refs := uniqueRefs(missing)
 		// Approved: finish the fetch even if the asker has gone, so the
@@ -333,6 +370,16 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, origin, request
 	s.mu.Unlock()
 	s.notify(true)
 	return proto.Response{Values: values}
+}
+
+// asker is who a request comes from.
+type asker struct {
+	origin    string       // whose approvals: "" for this Mac, or "user@host"
+	requester string       // how the window names them
+	host      string       // another machine's Tailscale name; empty for this Mac
+	pairing   string       // "new" for a caller to pair; the window says so
+	code      string       // the pairing code the caller's terminal shows
+	pair      func() error // on Allow, to remember the pairing
 }
 
 // logUse records a delivery in the access log, and the names it used. The
@@ -370,7 +417,7 @@ func (s *Server) notify(read bool) {
 	}
 	s.mu.Lock()
 	now := s.Now()
-	snap := menubar.Snapshot{Read: read, Uses: append([]menubar.Use(nil), s.uses...)}
+	snap := menubar.Snapshot{Read: read, Uses: append([]menubar.Use(nil), s.uses...), Alerts: append([]menubar.Alert(nil), s.alerts...)}
 	for _, e := range s.cache.list(now) {
 		k := key{e.Origin, e.Account, e.Ref}
 		snap.Held = append(snap.Held, menubar.Held{
@@ -407,6 +454,11 @@ func (s *Server) act(a menubar.Action) {
 		s.notify(false)
 	case menubar.OpStop:
 		s.Exit()
+	case menubar.OpDismiss:
+		s.mu.Lock()
+		s.alerts = nil
+		s.mu.Unlock()
+		s.notify(false)
 	}
 }
 

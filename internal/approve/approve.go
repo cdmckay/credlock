@@ -23,12 +23,17 @@ type Request struct {
 	Requester string // e.g. "bash (pid 4242)", from the kernel
 	// Origin is the tailnet machine that asked, as Tailscale identified it;
 	// empty for this Mac. Its command, directory and reason are its own claims.
-	Origin   string
-	Account  string
-	Secrets  []proto.Secret // the ones not yet approved
-	Approved int            // how many others the request also uses, already approved
-	Window   time.Duration  // an approval lasts this long after its last use...
-	Cap      time.Duration  // ...and never longer than this
+	Origin string
+	// Pairing is "new" for a machine user this hub hasn't paired with; Allow
+	// pairs it. Code is the four digits its terminal shows for this pairing. A
+	// key that differs from the paired one never reaches a window: the hub
+	// refuses it.
+	Pairing, Code string
+	Account       string
+	Secrets       []proto.Secret // the ones not yet approved
+	Approved      int            // how many others the request also uses, already approved
+	Window        time.Duration  // an approval lasts this long after its last use...
+	Cap           time.Duration  // ...and never longer than this
 }
 
 // Approver decides a request. false with a nil error means "denied";

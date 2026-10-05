@@ -13,6 +13,7 @@ static NSStatusItem *item;
 static NSMenu *menu;
 static NSTimer *dotTimer;
 static NSUInteger heldCount;
+static NSUInteger alertCount;  // while any, the key is red
 
 static NSString *str(id d, NSString *key) {
   id v = [d isKindOfClass:[NSDictionary class]] ? d[key] : nil;
@@ -53,6 +54,9 @@ static void sendAction(NSDictionary *action) {
 - (void)stop:(id)sender {
   sendAction(@{@"op" : @"stop"});
 }
+- (void)dismiss:(id)sender {
+  sendAction(@{@"op" : @"dismiss"});
+}
 @end
 
 static CLTarget *target;
@@ -90,15 +94,17 @@ static void drawTinted(NSImage *img, NSColor *color, NSRect r) {
 
 // iconImage is the key and, while secrets are being read, an orange dot on its
 // top right corner. The image is only as wide as the key plus half the dot,
-// and the same in both states, so the number stays close and never moves.
-static NSImage *iconImage(BOOL reading) {
+// and the same in every state, so the number stays close and never moves. The
+// key is red while there are alerts.
+static NSImage *iconImage(BOOL reading, BOOL alarmed) {
   NSImage *key = keySymbol();
   CGFloat keyWidth = key ? key.size.width : 10;
   CGFloat width = ceil(keyWidth + kDot / 2);
   return [NSImage imageWithSize:NSMakeSize(width, kIconHeight)
                         flipped:NO
                  drawingHandler:^BOOL(NSRect r) {
-                   drawTinted(key, NSColor.labelColor, NSMakeRect(0, 0, keyWidth, kIconHeight));
+                   drawTinted(key, alarmed ? NSColor.systemRedColor : NSColor.labelColor,
+                              NSMakeRect(0, 0, keyWidth, kIconHeight));
                    if (!reading) {
                      return YES;
                    }
@@ -115,7 +121,7 @@ static NSImage *iconImage(BOOL reading) {
 
 static void showIcon(BOOL reading) {
   NSString *what = reading ? @"credlock: secrets are being read" : @"credlock";
-  NSImage *img = iconImage(reading);
+  NSImage *img = iconImage(reading, alertCount > 0);
   img.accessibilityDescription = what;
   item.button.image = img;
   item.button.title = [NSString stringWithFormat:@"%lu", (unsigned long)heldCount];
@@ -225,8 +231,25 @@ static NSMenuItem *heldEntry(NSDictionary *held) {
   return m;
 }
 
-static void rebuild(NSArray *held, NSArray *uses) {
+static void rebuild(NSArray *held, NSArray *uses, NSArray *alerts) {
   [menu removeAllItems];
+  if (alerts.count) {
+    // Alerts first, in red: something to look at.
+    [menu addItem:heading(@"Alerts")];
+    for (id a in alerts) {
+      NSMenuItem *m = [[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];
+      NSString *line = [NSString stringWithFormat:@"%@  %@", str(a, @"at"), str(a, @"text")];
+      m.attributedTitle = [[NSAttributedString alloc]
+          initWithString:line
+              attributes:@{NSFontAttributeName : [NSFont menuFontOfSize:12.5], NSForegroundColorAttributeName : NSColor.systemRedColor}];
+      m.enabled = YES;
+      [menu addItem:m];
+    }
+    NSMenuItem *dismiss = [[NSMenuItem alloc] initWithTitle:@"Dismiss alerts" action:@selector(dismiss:) keyEquivalent:@""];
+    dismiss.target = target;
+    [menu addItem:dismiss];
+    [menu addItem:[NSMenuItem separatorItem]];
+  }
   NSString *count = [NSString stringWithFormat:@"credlock is holding %lu secret%@", (unsigned long)held.count,
                                                held.count == 1 ? @"" : @"s"];
   [menu addItem:note(count)];
@@ -266,9 +289,11 @@ static void rebuild(NSArray *held, NSArray *uses) {
 
 static void apply(NSDictionary *v) {
   NSArray *held = list(v, @"held");
+  NSArray *alerts = list(v, @"alerts");
   heldCount = held.count;
-  rebuild(held, list(v, @"uses"));
-  item.visible = heldCount > 0;
+  alertCount = alerts.count;
+  rebuild(held, list(v, @"uses"), alerts);
+  item.visible = heldCount > 0 || alertCount > 0;
   BOOL isRead = [v[@"read"] isKindOfClass:[NSNumber class]] && [v[@"read"] boolValue];
   if (isRead && heldCount > 0) {
     showRead();
@@ -335,7 +360,7 @@ int credlock_menubar_icon_snapshot(const char *path, int dark) {
       };
       for (int i = 0; i < 2; i++) {
         CGFloat x = 12 + i * 62;
-        NSImage *img = iconImage(i == 1);
+        NSImage *img = iconImage(i == 1, NO);
         [img drawInRect:NSMakeRect(x, 3, img.size.width, img.size.height)];
         // About the gap AppKit leaves when the image hugs the title.
         [@"4" drawAtPoint:NSMakePoint(x + img.size.width + 3, 4) withAttributes:font];

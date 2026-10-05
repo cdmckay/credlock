@@ -16,21 +16,13 @@ func write(t *testing.T, body string) {
 	t.Setenv("CREDLOCK_CONFIG", p)
 }
 
-func TestBothRolesRead(t *testing.T) {
-	write(t, `
-[client]
-hubs = ["potato", "tomato:9000"]
-
-[hub]
-tailnet = "example.org"
-allow = ["papaya", "banana"]
-port = 7200
-`)
+func TestPinnedHubsAreRead(t *testing.T) {
+	write(t, "[client]\nhubs = [\"potato\", \"tomato:9000\"]\n")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(c.Client.Hubs, ",") != "potato,tomato:9000" || strings.Join(c.Hub.Allow, ",") != "papaya,banana" || c.Hub.ListenPort() != 7200 {
+	if strings.Join(c.Client.Hubs, ",") != "potato,tomato:9000" {
 		t.Fatalf("%+v", c)
 	}
 }
@@ -38,21 +30,14 @@ port = 7200
 func TestNoFileIsNoSettings(t *testing.T) {
 	t.Setenv("CREDLOCK_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
 	c, err := Load()
-	if err != nil || len(c.Client.Hubs) != 0 || len(c.Hub.Allow) != 0 || c.Hub.ListenPort() != DefaultPort {
+	if err != nil || len(c.Client.Hubs) != 0 {
 		t.Fatalf("%+v, %v", c, err)
 	}
 }
 
 func TestATypoIsAnError(t *testing.T) {
-	write(t, "[hub]\nalow = [\"papaya\"]\n")
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "hub.alow") {
-		t.Fatalf("got %v", err)
-	}
-}
-
-func TestAllowNeedsATailnet(t *testing.T) {
-	write(t, "[hub]\nallow = [\"papaya\"]\n")
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "hub.tailnet") {
+	write(t, "[client]\nhub = [\"potato\"]\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "client.hub") {
 		t.Fatalf("got %v", err)
 	}
 }

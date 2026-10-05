@@ -9,14 +9,20 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ### Added
 
-- Machines without 1Password, such as Linux servers on the same Tailscale
-  network, can use `credlock run`. They ask the Macs listed under
-  `[client] hubs` in `~/.config/credlock/config.toml`, all at once. A Mac
-  answers the machines listed under its `[hub] allow`, on the tailnet named
-  in its `[hub] tailnet` only, checking each with `tailscale whois`. It shows
-  its usual approval window, and sends the values back over the tailnet. The other machine keeps nothing. Approvals are kept
-  per machine, and the window, the menu bar and `credlock status` say which
-  machine each is for.
+- Machines without 1Password, such as Linux servers on your Tailscale
+  network, can use `credlock run`. A Mac turned on with `credlock hub on`
+  answers them: it shows its usual approval window, which says first which
+  machine is asking, and sends the values back over the tailnet. The other
+  machine keeps nothing.
+- Pairing: `credlock pair MAC` on the other machine pairs its user with the
+  Mac, in a window that shows a code its terminal shows too. Each user there
+  gets a key of their own, made on first use, and signs every request with
+  it. A key that doesn't match is refused and raises an alert in the menu
+  bar; five denied pairings from one machine pause its pairing requests for
+  an hour. `credlock hub status` lists the paired machines, and
+  `credlock hub forget HOST` unpairs one.
+- A menu bar alert: the key turns red, and its menu says what happened, until
+  dismissed.
 - A request whose asker goes away, such as a `credlock run` stopped with
   Ctrl-C, now closes its approval window.
 

@@ -49,6 +49,9 @@ type View struct {
 	Origin      string `json:"origin,omitempty"`
 	OriginTitle string `json:"origin_title,omitempty"`
 	OriginNote  string `json:"origin_note,omitempty"`
+	// OriginTone colours the card: "remote" for a paired machine, "pair" for
+	// a first pairing.
+	OriginTone string `json:"origin_tone,omitempty"`
 }
 
 // NewView lays out r for the window. Everything in it except Requester came
@@ -87,13 +90,32 @@ func NewView(r Request, timeout time.Duration) View {
 		v.Approved = fmt.Sprintf("Plus %d already approved.", r.Approved)
 	}
 	if origin := clean(r.Origin, 60); origin != "" {
+		who := strings.TrimSuffix(clean(r.Requester, 100), ", over Tailscale")
+		code := clean(r.Code, 8)
 		v.Origin = origin
-		v.Title = "Secret request from " + origin
 		v.Subtitle = "credlock · another machine is asking"
+		v.Title = "Secret request from " + origin
 		v.Question = fmt.Sprintf("Allow %s's command to use %d %s?", origin, n, noun)
+		v.Footer = fmt.Sprintf("Values go only to this command's environment on %s, and are never printed.", origin)
+		v.OriginTone = "remote"
 		v.OriginTitle = fmt.Sprintf("From %s, another machine on your tailnet", origin)
 		v.OriginNote = fmt.Sprintf("Tailscale verified that this request comes from %s. The command, directory and reason are what %s reports. If you allow it, the values are sent to %s.", origin, origin, origin)
-		v.Footer = fmt.Sprintf("Values go only to this command's environment on %s, and are never printed.", origin)
+		switch {
+		case r.Pairing == "new" && n == 0:
+			// Only pairing, from `credlock pair`: no secrets involved.
+			v.Title = "Pairing request from " + origin
+			v.Question = fmt.Sprintf("Pair %s with this Mac?", who)
+			v.Account = "none: this only pairs"
+			v.Lifetime = fmt.Sprintf("until you unpair it: credlock hub forget %s", origin)
+			v.Footer = fmt.Sprintf("Pairing sends no secrets. Each one %s asks for later still needs your Allow.", origin)
+			v.OriginTone = "pair"
+			v.OriginTitle = fmt.Sprintf("%s wants to pair with this Mac", who)
+			v.OriginNote = fmt.Sprintf("It hasn't asked this Mac before. Its terminal shows the code %s: if yours does too, Allow pairs it. Deny if you didn't just run something there.", code)
+		case r.Pairing == "new":
+			v.OriginTone = "pair"
+			v.OriginTitle = fmt.Sprintf("%s wants to pair with this Mac", who)
+			v.OriginNote = fmt.Sprintf("It hasn't asked this Mac before. Its terminal shows the code %s: if yours does too, Allow pairs it and sends the values to %s. Deny if you didn't just run something there.", code, origin)
+		}
 	}
 	return v
 }

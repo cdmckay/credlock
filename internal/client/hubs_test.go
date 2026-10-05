@@ -2,6 +2,8 @@ package client
 
 import (
 	"bufio"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"strings"
@@ -10,7 +12,18 @@ import (
 	"time"
 
 	"github.com/cdmckay/credlock/internal/proto"
+	"github.com/cdmckay/credlock/internal/state"
 )
+
+// testAuth is a fresh key for this machine user, with no hubs paired.
+func testAuth(t *testing.T) hubAuth {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hubAuth{key: priv, user: "me", paired: map[string]bool{}}
+}
 
 // fakeHub answers like a hub: "holds" has the secrets already; "allow",
 // "deny" and "timeout" are how its window ends; "wait" never answers, and
@@ -44,6 +57,8 @@ func startHub(t *testing.T, behaviour string, delay time.Duration) *fakeHub {
 
 func (h *fakeHub) serve(conn net.Conn, behaviour string, delay time.Duration) {
 	defer func() { _ = conn.Close() }()
+	challenge := []byte("a fresh challenge")
+	_ = json.NewEncoder(conn).Encode(proto.Response{Challenge: base64.StdEncoding.EncodeToString(challenge)})
 	r := bufio.NewReader(conn)
 	line, err := r.ReadBytes('\n')
 	if err != nil {
@@ -51,6 +66,13 @@ func (h *fakeHub) serve(conn net.Conn, behaviour string, delay time.Duration) {
 	}
 	var req proto.Request
 	_ = json.Unmarshal(line, &req)
+	// A real hub refuses a request that isn't signed with the key it sends.
+	pub, err := state.ParsePublicKey(req.Key)
+	proof, _ := base64.StdEncoding.DecodeString(req.Proof)
+	if err != nil || !ed25519.Verify(pub, challenge, proof) || req.User != "me" {
+		_ = json.NewEncoder(conn).Encode(proto.Response{Error: "refused: unsigned"})
+		return
+	}
 	values := map[string]string{}
 	for _, s := range req.Secrets {
 		values[s.Ref] = h.addr + ":" + s.Ref
@@ -105,7 +127,7 @@ var request = proto.Request{Op: proto.OpResolve, Account: "acct", Reason: "testi
 
 func TestAHubThatHoldsTheSecretsAnswersBeforeAnyWindowOpens(t *testing.T) {
 	holds, other := startHub(t, "holds", 0), startHub(t, "allow", 0)
-	resp, err := askHubs([]string{other.addr, holds.addr}, request)
+	resp, _, err := askHubs([]string{other.addr, holds.addr}, request, testAuth(t))
 	if err != nil || resp.Values["op://v/a/f"] != holds.addr+":op://v/a/f" {
 		t.Fatalf("got %+v, %v", resp, err)
 	}
@@ -116,9 +138,9 @@ func TestAHubThatHoldsTheSecretsAnswersBeforeAnyWindowOpens(t *testing.T) {
 
 func TestTheFirstAllowWinsAndTheOtherWindowsClose(t *testing.T) {
 	allow, wait := startHub(t, "allow", 50*time.Millisecond), startHub(t, "wait", 0)
-	resp, err := askHubs([]string{wait.addr, allow.addr}, request)
-	if err != nil || resp.Values["op://v/a/f"] != allow.addr+":op://v/a/f" {
-		t.Fatalf("got %+v, %v", resp, err)
+	resp, winner, err := askHubs([]string{wait.addr, allow.addr}, request, testAuth(t))
+	if err != nil || resp.Values["op://v/a/f"] != allow.addr+":op://v/a/f" || winner != allow.addr {
+		t.Fatalf("got %+v from %q, %v", resp, winner, err)
 	}
 	if !waitFor(func() bool { _, hung := wait.state(); return hung }) {
 		t.Fatal("the other hub's window was left open")
@@ -127,7 +149,7 @@ func TestTheFirstAllowWinsAndTheOtherWindowsClose(t *testing.T) {
 
 func TestADenyEndsTheRequestEverywhere(t *testing.T) {
 	deny, wait := startHub(t, "deny", 20*time.Millisecond), startHub(t, "wait", 0)
-	resp, err := askHubs([]string{deny.addr, wait.addr}, request)
+	resp, _, err := askHubs([]string{deny.addr, wait.addr}, request, testAuth(t))
 	if err != nil || !resp.Denied || resp.TimedOut {
 		t.Fatalf("got %+v, %v", resp, err)
 	}
@@ -138,12 +160,12 @@ func TestADenyEndsTheRequestEverywhere(t *testing.T) {
 
 func TestAWindowNobodyAnsweredDoesNotCount(t *testing.T) {
 	timeout, allow := startHub(t, "timeout", 0), startHub(t, "allow", 100*time.Millisecond)
-	resp, err := askHubs([]string{timeout.addr, allow.addr}, request)
+	resp, _, err := askHubs([]string{timeout.addr, allow.addr}, request, testAuth(t))
 	if err != nil || resp.Values["op://v/a/f"] != allow.addr+":op://v/a/f" {
 		t.Fatalf("got %+v, %v", resp, err)
 	}
 	both := []string{startHub(t, "timeout", 0).addr, startHub(t, "timeout", 0).addr}
-	if resp, err := askHubs(both, request); err != nil || !resp.TimedOut {
+	if resp, _, err := askHubs(both, request, testAuth(t)); err != nil || !resp.TimedOut {
 		t.Fatalf("every window timed out: got %+v, %v", resp, err)
 	}
 }
@@ -156,10 +178,28 @@ func TestAnUnreachableHubIsSkipped(t *testing.T) {
 	down := ln.Addr().String()
 	_ = ln.Close()
 	allow := startHub(t, "allow", 0)
-	if resp, err := askHubs([]string{down, allow.addr}, request); err != nil || len(resp.Values) != 1 {
+	if resp, _, err := askHubs([]string{down, allow.addr}, request, testAuth(t)); err != nil || len(resp.Values) != 1 {
 		t.Fatalf("got %+v, %v", resp, err)
 	}
-	if _, err := askHubs([]string{down}, request); err == nil || !strings.Contains(err.Error(), "hub.allow") {
+	if _, _, err := askHubs([]string{down}, request, testAuth(t)); err == nil || !strings.Contains(err.Error(), "credlock hub on") {
 		t.Fatalf("with no hub reachable: %v", err)
+	}
+}
+
+func TestAHubIsToldTheCodeOnlyWhenNotYetPaired(t *testing.T) {
+	hub := startHub(t, "allow", 0)
+	auth := testAuth(t)
+	var said []string
+	auth.say = func(s string) { said = append(said, s) }
+	if _, _, err := askHubs([]string{hub.addr}, request, auth); err != nil {
+		t.Fatal(err)
+	}
+	if len(said) != 1 || !strings.Contains(said[0], "its window shows the code") {
+		t.Fatalf("an unpaired hub: %q", said)
+	}
+	said = nil
+	auth.paired[strings.ToLower(hub.addr)] = true
+	if _, _, err := askHubs([]string{hub.addr}, request, auth); err != nil || len(said) != 0 {
+		t.Fatalf("a paired hub: %q, %v", said, err)
 	}
 }

@@ -17,9 +17,12 @@ import (
 	"syscall"
 	"time"
 
+	"context"
 	"github.com/cdmckay/credlock/internal/config"
 	"github.com/cdmckay/credlock/internal/platform"
 	"github.com/cdmckay/credlock/internal/proto"
+	"github.com/cdmckay/credlock/internal/state"
+	"os/user"
 )
 
 // ExitDenied is the exit status when you deny a request (EX_NOPERM).
@@ -145,13 +148,10 @@ func Run(args []string) int {
 		switch {
 		case platform.HasHelper:
 			resp, err = Call(req, true)
-		case len(cfg.Client.Hubs) > 0:
+		default:
 			// No 1Password here: a Mac on the tailnet asks you, and sends
 			// the values back. Nothing is kept on this machine.
-			resp, err = askHubs(cfg.Client.Hubs, req)
-		default:
-			err = fmt.Errorf("this machine has no credlock helper (that needs the 1Password app), and no hubs to ask. "+
-				"Add [client] hubs = [\"potato\"], naming a Mac on the tailnet that runs one, to %s", config.Path())
+			resp, err = viaHubs(cfg, req)
 		}
 		if err != nil {
 			return fail(err)
@@ -302,4 +302,96 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// viaHubs asks the Macs this machine was paired with (credlock pair), or the
+// ones [client] hubs in the config names, for a machine without 1Password.
+// The key is made on first use; nothing else is kept here.
+func viaHubs(cfg config.Config, req proto.Request) (proto.Response, error) {
+	key, err := state.Key()
+	if err != nil {
+		return proto.Response{}, fmt.Errorf("this machine's credlock key: %w", err)
+	}
+	remembered, err := state.LoadClient()
+	if err != nil {
+		return proto.Response{}, err
+	}
+	hubs := cfg.Client.Hubs
+	if len(hubs) == 0 {
+		hubs = remembered.Hubs
+	}
+	if len(hubs) == 0 {
+		return proto.Response{}, errors.New("this machine has no 1Password, and no Mac to ask for secrets. " +
+			"Pair it with a Mac on the tailnet, once: credlock pair MAC (the Mac needs credlock hub on)")
+	}
+	auth := hubAuth{key: key, user: currentUser(), paired: map[string]bool{},
+		say: func(s string) { fmt.Fprintln(os.Stderr, s) }}
+	for _, h := range remembered.Hubs {
+		auth.paired[strings.ToLower(h)] = true
+	}
+	resp, winner, err := askHubs(hubs, req, auth)
+	if err == nil && len(resp.Values) > 0 && remembered.Remember(winner) {
+		_ = remembered.Save()
+	}
+	return resp, err
+}
+
+// Pair is `credlock pair MAC`, on a machine without 1Password: it pairs this
+// user here with a Mac on the tailnet, which asks you in its approval window,
+// and remembers the Mac, so credlock run asks it from then on.
+func Pair(args []string) int {
+	if platform.HasHelper {
+		return fail(errors.New("this Mac has its own helper and pairs nothing; to let other machines ask it, run credlock hub on"))
+	}
+	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
+		fmt.Fprintln(os.Stderr, "usage: credlock pair MAC, naming a Mac on the tailnet that has hub mode on")
+		return 2
+	}
+	hub := args[0]
+	key, err := state.Key()
+	if err != nil {
+		return fail(fmt.Errorf("this machine's credlock key: %w", err))
+	}
+	host, _ := os.Hostname()
+	host, _, _ = strings.Cut(host, ".")
+	cwd, _ := os.Getwd()
+	auth := hubAuth{key: key, user: currentUser(), paired: map[string]bool{},
+		say: func(s string) { fmt.Fprintln(os.Stderr, s) }}
+	fmt.Fprintf(os.Stderr, "credlock: asking %s to pair; answer in its approval window.\n", hub)
+	resp, err := callHub(context.Background(), hub, proto.Request{
+		Op:      proto.OpPair,
+		Reason:  fmt.Sprintf("pair %s on %s with %s", auth.user, host, hub),
+		Command: []string{"credlock", "pair", hub},
+		Cwd:     cwd,
+	}, hubAsk, auth)
+	switch {
+	case err != nil:
+		return fail(err)
+	case resp.TimedOut:
+		fmt.Fprintf(os.Stderr, "credlock: nobody answered %s's window in time, so it didn't pair. Run credlock pair %s again when you're at it.\n", hub, hub)
+		return ExitDenied
+	case resp.Denied:
+		fmt.Fprintf(os.Stderr, "credlock: %s denied the pairing.\n", hub)
+		return ExitDenied
+	case !resp.Paired:
+		return fail(errors.New("the hub didn't say whether it paired"))
+	}
+	remembered, err := state.LoadClient()
+	if err != nil {
+		return fail(err)
+	}
+	if remembered.Remember(hub) {
+		if err := remembered.Save(); err != nil {
+			return fail(err)
+		}
+	}
+	fmt.Printf("credlock: paired with %s. credlock run asks it from now on.\n", hub)
+	return 0
+}
+
+func currentUser() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return os.Getenv("USER")
 }
