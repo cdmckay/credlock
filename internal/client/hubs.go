@@ -49,10 +49,12 @@ func askHubs(hubs []string, req proto.Request, auth hubAuth) (proto.Response, st
 	check.NoPrompt = true
 	var reachable []string
 	var failures []string
+	offline := false
 	for res := range fanOut(context.Background(), hubs, check, hubCheck, auth) {
 		switch {
 		case res.err != nil:
 			failures = append(failures, fmt.Sprintf("%s: %v", res.hub, res.err))
+			offline = offline || res.resp.Error == "" // unreachable, rather than refused
 		case res.resp.NotHeld:
 			reachable = append(reachable, res.hub)
 		default:
@@ -60,7 +62,7 @@ func askHubs(hubs []string, req proto.Request, auth hubAuth) (proto.Response, st
 		}
 	}
 	if len(reachable) == 0 {
-		return proto.Response{}, "", &unreachable{failures}
+		return proto.Response{}, "", &unreachable{failures, offline}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -84,11 +86,18 @@ func askHubs(hubs []string, req proto.Request, auth hubAuth) (proto.Response, st
 	return proto.Response{}, "", errors.New(strings.Join(failures, "; "))
 }
 
-// unreachable is no hub answering at all.
-type unreachable struct{ failures []string }
+// unreachable is no hub taking the request: offline, or refusing it.
+type unreachable struct {
+	failures []string
+	offline  bool // some couldn't be reached at all
+}
 
 func (e *unreachable) Error() string {
-	return fmt.Sprintf("no hub could be asked (%s). Check that the Mac is online on the tailnet, with hub mode on (credlock hub on)", strings.Join(e.failures, "; "))
+	msg := "no hub took the request: " + strings.Join(e.failures, "; ")
+	if e.offline {
+		msg += ". Check that the Mac is online on the tailnet, with hub mode on (credlock hub on)"
+	}
+	return msg
 }
 
 type hubResult struct {
