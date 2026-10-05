@@ -46,14 +46,9 @@ type Request struct {
 	// window opens elsewhere.
 	NoPrompt bool `json:"no_prompt,omitempty"`
 
-	// From another machine. Its first line carries only Nonce, for the hub to
-	// sign. Its request then says who it says it is, with proof it holds the
-	// key it sends: a signature over the hub's challenge, its nonce and the
-	// hub's key (state.ClientProof).
-	Nonce string `json:"nonce,omitempty"`
-	Key   string `json:"key,omitempty"`
-	User  string `json:"user,omitempty"`
-	Proof string `json:"proof,omitempty"`
+	// User is the user another machine says is asking. Its key is the one in
+	// its TLS certificate (see internal/channel).
+	User string `json:"user,omitempty"`
 
 	// For OpHub.
 	Hub  string `json:"hub,omitempty"`
@@ -95,12 +90,9 @@ type Response struct {
 	NotHeld bool    `json:"not_held,omitempty"`
 	Error   string  `json:"error,omitempty"`
 	Entries []Entry `json:"entries,omitempty"`
-	// Challenge is a hub's answer to another machine's nonce: random bytes
-	// for the machine to sign, with the hub's own key and its signature over
-	// the nonce and the challenge (state.HubProof).
-	Challenge string `json:"challenge,omitempty"`
-	HubKey    string `json:"hub_key,omitempty"`
-	HubProof  string `json:"hub_proof,omitempty"`
+	// Pairing comes before a hub's answer, when it opens its pairing window:
+	// the other machine shows the code the window shows.
+	Pairing bool `json:"pairing,omitempty"`
 	// Paired answers OpPair: this machine user is paired with the hub.
 	Paired bool     `json:"paired,omitempty"`
 	Hub    *HubInfo `json:"hub,omitempty"`

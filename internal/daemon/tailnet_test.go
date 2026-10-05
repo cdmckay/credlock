@@ -4,8 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/base64"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cdmckay/credlock/internal/approve"
+	"github.com/cdmckay/credlock/internal/channel"
 	"github.com/cdmckay/credlock/internal/client"
 	"github.com/cdmckay/credlock/internal/proto"
 	"github.com/cdmckay/credlock/internal/state"
@@ -64,67 +64,73 @@ func newKey(t *testing.T) ed25519.PrivateKey {
 	return priv
 }
 
-// session is one connection to the hub, once it has answered our nonce.
+// session is one connection to the hub, after the TLS handshake.
 type session struct {
-	conn  net.Conn
-	rd    *bufio.Reader
-	nonce []byte
-	hello proto.Response
+	conn *tls.Conn
+	rd   *bufio.Reader
+	code string // the pairing code both ends of this session show
 }
 
-// open connects and sends a nonce, as a client does, and checks that the hub
-// signed it with its key. A refusal comes back in hello.Error.
-func (r *remote) open() (*session, error) {
-	conn, err := net.Dial("tcp", r.addr)
+// open connects as a machine with key does, and checks that the hub proved
+// its own key.
+func (r *remote) open(key ed25519.PrivateKey) (*session, error) {
+	cert, err := channel.Certificate(key)
 	if err != nil {
 		return nil, err
 	}
-	nonce := make([]byte, state.NonceSize)
-	_, _ = rand.Read(nonce)
-	s := &session{conn: conn, rd: bufio.NewReader(conn), nonce: nonce}
-	if err := json.NewEncoder(conn).Encode(proto.Request{Nonce: base64.StdEncoding.EncodeToString(nonce)}); err != nil {
+	raw, err := net.Dial("tcp", r.addr)
+	if err != nil {
+		return nil, err
+	}
+	conn := channel.Client(raw, cert, func(hubKey string) error {
+		if hubKey != state.PublicKey(r.key) {
+			return fmt.Errorf("the hub proved another key: %s", hubKey)
+		}
+		return nil
+	})
+	if err := conn.Handshake(); err != nil {
+		_ = raw.Close()
+		return nil, err
+	}
+	code, err := channel.PairingCode(conn.ConnectionState())
+	if err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
-	if s.hello, err = readAnswer(s.rd); err != nil || s.hello.Error != "" {
-		return s, err
-	}
-	challenge, _ := base64.StdEncoding.DecodeString(s.hello.Challenge)
-	proof, _ := base64.StdEncoding.DecodeString(s.hello.HubProof)
-	if s.hello.HubKey != state.PublicKey(r.key) || !ed25519.Verify(r.key.Public().(ed25519.PublicKey), state.HubProof(nonce, challenge), proof) {
-		_ = conn.Close()
-		return nil, fmt.Errorf("the hub didn't prove its key: %+v", s.hello)
-	}
-	return s, nil
+	return &session{conn: conn, rd: bufio.NewReader(conn), code: code}, nil
 }
 
-// signed is req from user, signed with key for this connection.
-func (s *session) signed(key ed25519.PrivateKey, user string, req proto.Request) proto.Request {
-	challenge, _ := base64.StdEncoding.DecodeString(s.hello.Challenge)
-	req.Key, req.User = state.PublicKey(key), user
-	req.Proof = base64.StdEncoding.EncodeToString(ed25519.Sign(key, state.ClientProof(challenge, s.nonce, s.hello.HubKey)))
-	return req
+// send sends req as user, and returns the answer and whether the hub said it
+// was opening its pairing window first.
+func (s *session) send(user string, req proto.Request) (proto.Response, bool, error) {
+	req.User = user
+	if err := json.NewEncoder(s.conn).Encode(req); err != nil {
+		return proto.Response{}, false, err
+	}
+	announced := false
+	for {
+		resp, err := readAnswer(s.rd)
+		if err != nil || !resp.Pairing {
+			return resp, announced, err
+		}
+		announced = true
+	}
 }
 
-// try sends req signed with key, as user, and returns the answer and the
-// pairing code a client would show for it. It fails nothing, so goroutines
-// can use it.
+// try sends req as user, from a machine with key, and returns the answer and
+// the pairing code its terminal would show: none unless the hub said it
+// opened its pairing window. It fails nothing, so goroutines can use it.
 func (r *remote) try(key ed25519.PrivateKey, user string, req proto.Request) (proto.Response, string, error) {
-	s, err := r.open()
+	s, err := r.open(key)
 	if err != nil {
 		return proto.Response{}, "", err
 	}
 	defer func() { _ = s.conn.Close() }()
-	if s.hello.Error != "" {
-		return s.hello, "", nil
+	resp, announced, err := s.send(user, req)
+	if !announced {
+		return resp, "", err
 	}
-	req = s.signed(key, user, req)
-	if err := json.NewEncoder(s.conn).Encode(req); err != nil {
-		return proto.Response{}, "", err
-	}
-	challenge, _ := base64.StdEncoding.DecodeString(s.hello.Challenge)
-	resp, err := readAnswer(s.rd)
-	return resp, state.PairingCode(challenge, s.nonce, req.Key, s.hello.HubKey), err
+	return resp, s.code, err
 }
 
 // ask is try, failing the test on any error.
@@ -172,8 +178,8 @@ func TestAFirstRequestPairsInItsWindowAndThenNeedsNone(t *testing.T) {
 	key, a := newKey(t), sec("A", "op://v/a/f")
 
 	resp, code := r.ask(key, "me", resolveReq("acme", a))
-	if resp.Error != "" || resp.Values[a.Ref] != "secret:"+a.Ref {
-		t.Fatalf("first request: %+v", resp)
+	if resp.Error != "" || resp.Values[a.Ref] != "secret:"+a.Ref || code == "" {
+		t.Fatalf("first request: %+v, code %q", resp, code)
 	}
 	// Two windows, one job each: the pairing, with no secrets in it, then the
 	// approval, with no pairing in it.
@@ -189,9 +195,10 @@ func TestAFirstRequestPairsInItsWindowAndThenNeedsNone(t *testing.T) {
 		t.Fatalf("not paired: %+v", r.peers())
 	}
 
-	// Paired, and approved: the same request again needs no window at all.
-	if resp, _ := r.ask(key, "me", resolveReq("acme", a)); resp.Values[a.Ref] == "" {
-		t.Fatalf("second request: %+v", resp)
+	// Paired, and approved: the same request again needs no window at all,
+	// and the terminal shows no code.
+	if resp, code := r.ask(key, "me", resolveReq("acme", a)); resp.Values[a.Ref] == "" || code != "" {
+		t.Fatalf("second request: %+v, code %q", resp, code)
 	}
 	if n := len(r.h.approver.dialogs()); n != 2 {
 		t.Fatalf("%d windows after a paired, approved request again", n)
@@ -225,7 +232,8 @@ func TestAKeyThatDoesntMatchIsRefusedAndRaisesAnAlert(t *testing.T) {
 	if n := len(r.h.approver.dialogs()); n != 2 {
 		t.Fatalf("a mismatched key reached a window (%d windows)", n)
 	}
-	if got := r.alerts(); len(got) != 1 || !strings.Contains(got[0], "possibly an attack") {
+	// The user is only what the machine says; the alert says so.
+	if got := r.alerts(); len(got) != 1 || !strings.Contains(got[0], "Something on papaya, saying it is me") || !strings.Contains(got[0], "may be an attack") {
 		t.Fatalf("alerts: %q", got)
 	}
 	if r.peers()["me@papaya"].Key != state.PublicKey(mine) {
@@ -241,7 +249,7 @@ func TestFiveDeniedPairingsCoolTheMachineDown(t *testing.T) {
 		}
 	}
 	resp, _ := r.ask(newKey(t), "me", resolveReq("acme", sec("A", "op://v/a/f")))
-	if !strings.Contains(resp.Error, "too many pairing requests") {
+	if !strings.Contains(resp.Error, "too many pairing windows") {
 		t.Fatalf("after %d denials: %+v", maxPairingDenials, resp)
 	}
 	if n := len(r.h.approver.dialogs()); n != maxPairingDenials {
@@ -293,40 +301,25 @@ func TestTheHubsOwnMachineIsRefused(t *testing.T) {
 	}
 }
 
-func TestAnUnsignedRequestIsRefused(t *testing.T) {
+func TestAMachineWithoutAKeyIsRefused(t *testing.T) {
 	r := newRemote(t, "papaya", true)
-	s, err := r.open()
+	raw, err := net.Dial("tcp", r.addr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = s.conn.Close() }()
-	req := s.signed(newKey(t), "me", resolveReq("acme", sec("A", "op://v/a/f")))
-	req.Proof = base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
-	if err := json.NewEncoder(s.conn).Encode(req); err != nil {
-		t.Fatal(err)
+	conn := tls.Client(raw, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13})
+	defer func() { _ = conn.Close() }()
+	_ = conn.Handshake() // a TLS 1.3 client finishes before the hub refuses it
+	_ = json.NewEncoder(conn).Encode(resolveReq("acme", sec("A", "op://v/a/f")))
+	if resp, err := readAnswer(bufio.NewReader(conn)); err == nil {
+		t.Fatalf("the hub answered a machine with no key: %+v", resp)
 	}
-	if resp, err := readAnswer(s.rd); err != nil || !strings.Contains(resp.Error, "isn't signed") || len(r.h.approver.dialogs()) != 0 {
-		t.Fatalf("got %+v, %v", resp, err)
-	}
-}
-
-func TestAProofForAnotherHubIsRefused(t *testing.T) {
-	r := newRemote(t, "papaya", true)
-	s, err := r.open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = s.conn.Close() }()
-	s.hello.HubKey = state.PublicKey(newKey(t)) // as if signed for a hub with another key
-	if err := json.NewEncoder(s.conn).Encode(s.signed(newKey(t), "me", resolveReq("acme", sec("A", "op://v/a/f")))); err != nil {
-		t.Fatal(err)
-	}
-	if resp, err := readAnswer(s.rd); err != nil || !strings.Contains(resp.Error, "isn't signed") {
-		t.Fatalf("got %+v, %v", resp, err)
+	if len(r.h.approver.dialogs()) != 0 {
+		t.Fatal("a window opened")
 	}
 }
 
-func TestAMachineThatSendsNoNonceIsRefused(t *testing.T) {
+func TestAMachineThatDoesntSpeakTLSGetsNothing(t *testing.T) {
 	r := newRemote(t, "papaya", true)
 	conn, err := net.Dial("tcp", r.addr)
 	if err != nil {
@@ -336,8 +329,11 @@ func TestAMachineThatSendsNoNonceIsRefused(t *testing.T) {
 	if err := json.NewEncoder(conn).Encode(resolveReq("acme", sec("A", "op://v/a/f"))); err != nil {
 		t.Fatal(err)
 	}
-	if resp, err := readAnswer(bufio.NewReader(conn)); err != nil || !strings.Contains(resp.Error, "nonce") || resp.Challenge != "" {
-		t.Fatalf("got %+v, %v", resp, err)
+	if resp, err := readAnswer(bufio.NewReader(conn)); err == nil {
+		t.Fatalf("got %+v", resp)
+	}
+	if len(r.h.approver.dialogs()) != 0 {
+		t.Fatal("a window opened")
 	}
 }
 
@@ -490,11 +486,13 @@ func (w *waitingApprover) wasClosed() bool {
 func TestHangingUpClosesTheWindow(t *testing.T) {
 	w := &waitingApprover{}
 	r := newRemote(t, "papaya", true, func(s *Server) { s.Approver = w })
-	s, err := r.open()
+	s, err := r.open(newKey(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.NewEncoder(s.conn).Encode(s.signed(newKey(t), "me", resolveReq("acme", sec("A", "op://v/a/f")))); err != nil {
+	req := resolveReq("acme", sec("A", "op://v/a/f"))
+	req.User = "me"
+	if err := json.NewEncoder(s.conn).Encode(req); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(50 * time.Millisecond) // the window is open
@@ -540,7 +538,7 @@ func TestPairingRequestsQueuedTogetherStillStopAtFiveDenials(t *testing.T) {
 	})
 	refused := 0
 	for _, resp := range got {
-		if strings.Contains(resp.Error, "too many pairing requests") {
+		if strings.Contains(resp.Error, "too many pairing windows") {
 			refused++
 		}
 	}
@@ -594,5 +592,50 @@ func TestAPortSomethingElseHoldsRaisesAnAlert(t *testing.T) {
 	r.h.server.listenFailed("100.64.0.1:7177", errors.New("some other failure"))
 	if a := r.alerts(); len(a) != 1 {
 		t.Fatalf("an ordinary failure raised an alert: %q", a)
+	}
+}
+
+// timingOut is a window nobody answers.
+type timingOut struct {
+	mu    sync.Mutex
+	shown int
+}
+
+func (w *timingOut) Approve(context.Context, approve.Request) (bool, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.shown++
+	return false, approve.ErrTimedOut
+}
+
+func TestUnansweredPairingWindowsCountTowardTheCooldown(t *testing.T) {
+	w := &timingOut{}
+	r := newRemote(t, "papaya", true, func(s *Server) { s.Approver = w })
+	pair := proto.Request{Op: proto.OpPair, Reason: "pair"}
+	for i := range maxPairingDenials {
+		if resp, _ := r.ask(newKey(t), "me", pair); !resp.TimedOut {
+			t.Fatalf("window %d: %+v", i, resp)
+		}
+	}
+	resp, _ := r.ask(newKey(t), "me", pair)
+	if !strings.Contains(resp.Error, "too many pairing windows") || w.shown != maxPairingDenials {
+		t.Fatalf("after %d unanswered windows: %+v", w.shown, resp)
+	}
+}
+
+func TestTheTerminalShowsTheCodeOnceTheHubSaysItIsPairing(t *testing.T) {
+	r := newRemote(t, "papaya", true)
+	key := newKey(t)
+	pair := proto.Request{Op: proto.OpPair, Reason: "pair"}
+	resp, code := r.ask(key, "me", pair)
+	if shown := r.h.approver.dialogs(); !resp.Paired || code == "" || len(shown) != 1 || shown[0].Code != code {
+		t.Fatalf("got %+v, code %q, windows %+v", resp, code, shown)
+	}
+	// Forgotten on the hub, but not on the machine: the hub still says so,
+	// so the terminal still shows the code its window does.
+	r.h.server.hubOp(proto.Request{Op: proto.OpHub, Hub: proto.HubForget, Host: "papaya"})
+	resp, code = r.ask(key, "me", resolveReq("acme", sec("A", "op://v/a/f")))
+	if shown := r.h.approver.dialogs(); resp.Values == nil || code == "" || len(shown) != 3 || shown[1].Code != code {
+		t.Fatalf("after forget: %+v, code %q, windows %+v", resp, code, shown)
 	}
 }

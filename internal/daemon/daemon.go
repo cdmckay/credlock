@@ -1,12 +1,13 @@
 // Package daemon is credlock's helper: a per-user process that holds approved
 // secrets in memory, asks before handing out anything new, and exits after an
-// idle hour. The client starts it on first use.
+// idle hour, unless hub mode is on. The client starts it on first use.
 package daemon
 
 import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -98,8 +99,8 @@ type Server struct {
 	suffix, self string
 	// known is the account list, once Accounts has given one.
 	known []client.Account
-	// key is LoadKey's key, once a machine has asked.
-	key ed25519.PrivateKey
+	// cert is LoadKey's key in a TLS certificate, once a machine has asked.
+	cert *tls.Certificate
 	// alerts are what the person should look at, newest first; the menu bar
 	// key turns red until they are dismissed.
 	alerts []menubar.Alert
@@ -373,8 +374,10 @@ type asker struct {
 	host      string // another machine's Tailscale name; empty for this Mac
 	user, key string // the user another machine reports, and the key it proved
 	// code is set while the caller still has to pair, in a pairing window of
-	// its own: the four digits its terminal shows.
-	code string
+	// its own: the four digits its terminal shows once announce tells it the
+	// window is open.
+	code     string
+	announce func()
 }
 
 // logUse records a delivery in the access log, and the names it used. The

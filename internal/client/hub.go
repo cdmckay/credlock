@@ -42,7 +42,7 @@ func Hub(args []string) int {
 			fmt.Fprintf(os.Stderr, "credlock: couldn't remove the login item: %v\n", err)
 		}
 	case proto.HubForget:
-		fmt.Printf("credlock: forgot %s; it pairs again, in its approval window, the next time it asks\n", req.Host)
+		fmt.Printf("credlock: forgot %s; it pairs again, in a pairing window, the next time it asks (or with credlock pair there)\n", req.Host)
 	}
 	printHub(resp.Hub)
 	return 0
@@ -58,7 +58,7 @@ func printHub(h *proto.HubInfo) {
 		where = "listening on " + strings.Join(h.Listening, ", ")
 	}
 	fmt.Printf("credlock: hub mode is on, for tailnet %q, %s.\n", h.Tailnet, where)
-	fmt.Println("Machines on that tailnet can ask this Mac; each pairs the first time it asks, in its approval window.")
+	fmt.Println("Machines on that tailnet can ask this Mac; each pairs first, with credlock pair or when it first asks, in a pairing window.")
 	if len(h.Peers) == 0 {
 		fmt.Println("No machines paired yet.")
 		return

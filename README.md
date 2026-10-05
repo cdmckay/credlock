@@ -78,23 +78,29 @@ How it's kept safe:
   that tailnet, so a device elsewhere can't pass for one of yours.
 - **A key says which user is asking, once paired.** credlock makes one for
   each user on the other machine, readable only by them, in
-  `~/.local/state/credlock`, and every request signs a fresh challenge with
-  it. The user name is only what that machine reports, and the window says
-  so. What ties a first pairing to you is its code: pair only if the window
-  shows the code your terminal printed. After that, another user there can't
-  ask in your name without your key.
-- **The Mac proves it's the Mac.** It signs every connection with a key of
-  its own, which the other machine remembers when it pairs and checks before
-  it says what it wants. Something else holding the Mac's port, such as
-  another user's program there, can't answer in its place, and the Mac's menu
-  bar raises an alert when something holds the port.
+  `~/.local/state/credlock`. The user name is only what that machine
+  reports, and the window says so. What ties a first pairing to you is its
+  code: pair only if the window shows the code your terminal printed. After
+  that, another user there can't ask in your name without your key.
+- **Both ends prove themselves, over TLS 1.3.** The Mac has a key of its
+  own too, and each side's is in the certificate it connects with, so the
+  connection is encrypted and tied to both. The other machine remembers the
+  Mac's key when it pairs and refuses a Mac that answers with another,
+  before it sends anything. Something else holding the Mac's port, such as
+  another user's program there, can't read what a paired machine asks or
+  answer in the Mac's place, and the Mac's menu bar raises an alert when
+  something holds the port. The pairing code comes from the TLS session, so
+  anything in the middle of a pairing shows the two ends different codes.
 - **A key that doesn't match is refused, and the Mac's menu bar key turns
-  red** with an alert, since a reinstall has no key at all: something else
-  is asking in that machine's name. Re-pair on purpose: `credlock hub forget
-  papaya` on the Mac, then `credlock pair` again.
-- **Five denied pairing requests from one machine** refuse its pairing
-  requests for an hour, so a window can't be put up again and again until
-  it's allowed out of habit.
+  red** with an alert. Either credlock was reinstalled on that machine, which
+  makes a new key, or something else is asking in its name. After a
+  reinstall, re-pair on purpose: `credlock hub forget papaya` on the Mac,
+  then `credlock pair` again. The same goes the other way: a machine refuses
+  a Mac whose key changed until `credlock pair --forget potato` there.
+- **Five pairing windows from one machine that end without Pair** (denied,
+  unanswered, or given up on by the asker) refuse its pairing requests for
+  an hour, so a window can't be put up again and again until it's allowed
+  out of habit.
 - **Approvals are kept per user and machine.** What you allow for papaya is
   papaya's alone, and nothing the Mac approved for itself is served to it.
   The window says first, in a card of its own, which machine is asking.
@@ -146,7 +152,8 @@ How it's kept safe:
     <img src="docs/images/menubar-icon-light.png" width="260" alt="The menu bar icon: a key and the number 4 at rest, and the same key with an orange dot on its corner while secrets are being read.">
   </picture>
 - The helper keeps values in memory only, drops each an hour after its last use
-  or a day after its approval, and exits after an idle hour.
+  or a day after its approval, and exits after an idle hour, unless hub mode
+  is on.
 
 The socket lives in `~/Library/Caches/credlock`, a directory credlock keeps at
 mode 0700 and refuses to use if anyone else owns it.
@@ -169,12 +176,14 @@ mode 0700 and refuses to use if anyone else owns it.
   `op run`.
 - **Other machines, in hub mode:** root on a paired machine, or another
   program running as you there, can use your credlock key. Any device in the
-  tailnet can put up pairing windows, up to five denied ones an hour per
-  machine, and the user name in them is what that machine reports. A
-  machine's first contact with a Mac (`credlock pair`, or a first request
-  through `[client] hubs`) trusts the Mac that answers, as SSH trusts a new
-  host: pair only when the Mac's window shows your terminal's code. The Mac
-  has to be awake, on the tailnet, with hub mode on.
+  tailnet can put up pairing windows, five an hour per machine, and the user
+  name in them is what that machine reports. The count starts again if the
+  helper restarts. A machine's first contact with a Mac (`credlock pair`, a
+  first request through `[client] hubs`, or pairing again after `credlock
+  pair --forget`) trusts the Mac that answers, as SSH trusts a new host:
+  pair only when the Mac's window shows your terminal's code, and if no
+  window appeared, don't trust it. The Mac has to be awake, on the tailnet,
+  with hub mode on.
 - Approving needs a Mac for now; other systems, such as Linux servers, ask
   one (above). The operating-system pieces sit behind `internal/platform`. On
   Linux, approvals would use a plain zenity dialog until credlock has a

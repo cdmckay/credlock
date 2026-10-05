@@ -3,9 +3,7 @@ package client
 import (
 	"bufio"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/base64"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,15 +11,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cdmckay/credlock/internal/channel"
 	"github.com/cdmckay/credlock/internal/config"
 	"github.com/cdmckay/credlock/internal/proto"
-	"github.com/cdmckay/credlock/internal/state"
 )
 
 // hubAuth is how this user on this machine proves who they are to hubs, and
 // knows the hubs it paired with.
 type hubAuth struct {
-	key  ed25519.PrivateKey
+	cert tls.Certificate // this machine user's key, for TLS
 	user string
 	// pinned is the key each paired hub proved itself with, by hub name in
 	// lower case. A hub not in it is trusted on first use, as SSH trusts a
@@ -55,7 +53,9 @@ func askHubs(hubs []string, req proto.Request, auth hubAuth) (hubResult, error) 
 	var reachable []string
 	var failures []string
 	offline := false
-	for res := range fanOut(context.Background(), hubs, check, hubCheck, auth) {
+	checking, stop := context.WithCancel(context.Background())
+	defer stop() // closes the checks still waiting once one hub has answered
+	for res := range fanOut(checking, hubs, check, hubCheck, auth) {
 		switch {
 		case res.err != nil:
 			failures = append(failures, fmt.Sprintf("%s: %v", res.hub, res.err))
@@ -134,67 +134,64 @@ func fanOut(ctx context.Context, hubs []string, req proto.Request, wait time.Dur
 }
 
 // callHub sends one request to one hub over the tailnet and reads its answer,
-// with the key the hub proved itself with. This machine speaks first, with a
-// nonce, and the hub signs it: so before saying anything about what it wants,
-// this machine knows it reached a credlock hub, and the one it paired with if
-// it has (see state.HubProof). The request then signs the hub's challenge
-// with this machine user's key. Cancelling ctx closes the connection, which
-// the hub takes as a hang-up.
+// with the key the hub proved itself with. The connection is TLS 1.3 with
+// this machine user's key and the hub's (see internal/channel), and the hub's
+// key is checked against the one this machine paired with, if it has, before
+// anything is sent. If the hub opens its pairing window, it says so first, and
+// the code shows here. Cancelling ctx closes the connection, which the hub
+// takes as a hang-up.
 func callHub(ctx context.Context, hub string, req proto.Request, wait time.Duration, auth hubAuth) (proto.Response, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	conn, err := (&net.Dialer{Timeout: hubDial}).DialContext(ctx, "tcp", config.Addr(hub))
+	raw, err := (&net.Dialer{Timeout: hubDial}).DialContext(ctx, "tcp", config.Addr(hub))
 	if err != nil {
 		return proto.Response{}, "", err
 	}
+	var refused error
+	conn := channel.Client(raw, auth.cert, func(hubKey string) error {
+		if pinned := auth.pinned[strings.ToLower(hub)]; pinned != "" && pinned != hubKey {
+			refused = fmt.Errorf("refused: %s answered with a different key from the one it paired with. "+
+				"If credlock was reinstalled there, forget the old key (credlock pair --forget %s), then pair again, "+
+				"and only if its window shows the code printed here. If it wasn't, something else may be answering for %s", hub, hub, hub)
+			return refused
+		}
+		return nil
+	})
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	defer func() { _ = conn.Close() }()
-	nonce := make([]byte, state.NonceSize)
-	if _, err := rand.Read(nonce); err != nil {
+	handshake, done := context.WithTimeout(ctx, hubCheck)
+	err = conn.HandshakeContext(handshake)
+	done()
+	switch {
+	case refused != nil:
+		return proto.Response{Error: refused.Error()}, "", refused
+	case err != nil && ctx.Err() != nil:
+		return proto.Response{}, "", ctx.Err()
+	case err != nil:
+		msg := fmt.Sprintf("refused: %s didn't complete credlock's handshake (%v). Check that it runs credlock hub on "+
+			"with a current credlock, and that nothing else there uses port %d", hub, err, config.DefaultPort)
+		return proto.Response{Error: msg}, "", errors.New(msg)
+	}
+	cs := conn.ConnectionState()
+	hubKey, err := channel.PeerKey(cs)
+	if err != nil {
 		return proto.Response{}, "", err
 	}
-	if err := json.NewEncoder(conn).Encode(proto.Request{Nonce: base64.StdEncoding.EncodeToString(nonce)}); err != nil {
-		return proto.Response{}, "", err
-	}
-	r := bufio.NewReader(conn)
-	hello, err := readResponse(ctx, r)
-	if err != nil {
-		return hello, "", err
-	}
-	challenge, err := verifyHub(hub, hello, nonce, auth)
-	if err != nil {
-		return proto.Response{Error: err.Error()}, "", err
-	}
-	req.Key = state.PublicKey(auth.key)
 	req.User = auth.user
-	req.Proof = base64.StdEncoding.EncodeToString(ed25519.Sign(auth.key, state.ClientProof(challenge, nonce, hello.HubKey)))
-	if !req.NoPrompt && auth.pinned[strings.ToLower(hub)] == "" && auth.say != nil {
-		code := state.PairingCode(challenge, nonce, req.Key, hello.HubKey)
-		auth.say(fmt.Sprintf("credlock: if %s asks to pair with this machine, its window shows this code:\n\n      %s\n", hub, strings.Join(strings.Split(code, ""), " ")))
-	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return proto.Response{}, "", err
 	}
-	resp, err := readResponse(ctx, r)
-	return resp, hello.HubKey, err
-}
-
-// verifyHub checks the hub's answer to this machine's nonce: signed with the
-// key it sent, and that key the one this machine paired with, if it has. It
-// returns the hub's challenge.
-func verifyHub(hub string, hello proto.Response, nonce []byte, auth hubAuth) ([]byte, error) {
-	challenge, err := base64.StdEncoding.DecodeString(hello.Challenge)
-	pub, kerr := state.ParsePublicKey(hello.HubKey)
-	proof, perr := base64.StdEncoding.DecodeString(hello.HubProof)
-	if err != nil || len(challenge) == 0 || kerr != nil || perr != nil || !ed25519.Verify(pub, state.HubProof(nonce, challenge), proof) {
-		return nil, fmt.Errorf("refused: what answered at %s couldn't prove it is a credlock hub", hub)
+	r := bufio.NewReader(conn)
+	for {
+		resp, err := readResponse(ctx, r)
+		if err != nil || !resp.Pairing {
+			return resp, hubKey, err
+		}
+		if code, err := channel.PairingCode(cs); err == nil && auth.say != nil {
+			auth.say(fmt.Sprintf("credlock: %s is asking whether to pair with this machine. Pair only if its window shows this code:\n\n      %s\n", hub, strings.Join(strings.Split(code, ""), " ")))
+		}
 	}
-	if pinned := auth.pinned[strings.ToLower(hub)]; pinned != "" && pinned != hello.HubKey {
-		return nil, fmt.Errorf("refused: %s answered with a key it didn't pair with, so it may not be credlock on that Mac. "+
-			"If credlock was reinstalled there, pair again: credlock pair %s", hub, hub)
-	}
-	return challenge, nil
 }
 
 func readResponse(ctx context.Context, r *bufio.Reader) (proto.Response, error) {

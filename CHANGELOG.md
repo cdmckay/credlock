@@ -24,12 +24,13 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
   machine keeps nothing.
 - Pairing: `credlock pair MAC` on the other machine pairs its user with the
   Mac, in a window that shows a code its terminal shows too. Each user there
-  gets a key of their own, made on first use, and signs every request with
-  it; the Mac signs every connection with its own, which the machine
-  remembers when it pairs. A key that doesn't match is refused and raises an
-  alert in the menu bar; five denied pairings from one machine pause its
-  pairing requests for an hour. `credlock hub status` lists the paired machines, and
-  `credlock hub forget HOST` unpairs one.
+  gets a key of their own, made on first use, and the Mac has its own; they
+  connect over TLS 1.3 with them, and the machine remembers the Mac's key
+  when it pairs. A key that doesn't match is refused, and on the Mac raises
+  an alert in the menu bar; five pairing windows from one machine that end
+  without Pair pause its pairing requests for an hour. `credlock hub status`
+  lists the paired machines, `credlock hub forget HOST` unpairs one, and
+  `credlock pair --forget MAC` forgets a Mac's key after a reinstall there.
 - A menu bar alert: the key turns red, and its menu says what happened, until
   dismissed.
 - A request whose asker goes away, such as a `credlock run` stopped with

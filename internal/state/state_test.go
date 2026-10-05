@@ -67,31 +67,6 @@ func TestPublicKeysRoundTripAndSign(t *testing.T) {
 	}
 }
 
-func TestThePairingCodeIsFourDigitsBothSidesAgreeOn(t *testing.T) {
-	c, n := []byte("challenge"), []byte("nonce")
-	a := PairingCode(c, n, "ed25519:AAAA", "ed25519:HHHH")
-	if len(a) != 4 || strings.Trim(a, "0123456789") != "" || a != PairingCode(c, n, "ed25519:AAAA", "ed25519:HHHH") {
-		t.Fatalf("got %q", a)
-	}
-	if a == PairingCode([]byte("another"), n, "ed25519:AAAA", "ed25519:HHHH") &&
-		a == PairingCode(c, []byte("other"), "ed25519:AAAA", "ed25519:HHHH") &&
-		a == PairingCode(c, n, "ed25519:BBBB", "ed25519:HHHH") &&
-		a == PairingCode(c, n, "ed25519:AAAA", "ed25519:IIII") {
-		t.Fatal("the code ignores its inputs")
-	}
-}
-
-func TestTheTwoProofsCanNeverBeEachOther(t *testing.T) {
-	a, b := []byte("aaaa"), []byte("bbbb")
-	if string(HubProof(a, b)) == string(ClientProof(a, b, "")) || string(HubProof(a, b)) == string(HubProof(b, a)) {
-		t.Fatal("a proof can pass for another")
-	}
-	// Lengths are part of the message, so moving bytes between parts changes it.
-	if string(ClientProof([]byte("ab"), []byte("c"), "k")) == string(ClientProof([]byte("a"), []byte("bc"), "k")) {
-		t.Fatal("parts can shift into each other")
-	}
-}
-
 func TestHubAndClientStateRoundTrip(t *testing.T) {
 	isolated(t)
 	h := Hub{Enabled: true, Tailnet: "example.org", Peers: map[string]Peer{
@@ -114,8 +89,12 @@ func TestHubAndClientStateRoundTrip(t *testing.T) {
 	if err := c.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := LoadClient(); err != nil || len(got.Hubs) != 1 || got.Keys["potato"] != "ed25519:IIII" {
-		t.Fatalf("%+v, %v", got, err)
+	cl, err := LoadClient()
+	if err != nil || len(cl.Hubs) != 1 || cl.Keys["potato"] != "ed25519:IIII" {
+		t.Fatalf("%+v, %v", cl, err)
+	}
+	if !cl.Forget("POTATO") || len(cl.Hubs) != 0 || len(cl.Keys) != 0 || cl.Forget("potato") {
+		t.Fatalf("Forget should drop the hub and its key once: %+v", cl)
 	}
 }
 

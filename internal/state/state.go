@@ -9,9 +9,7 @@ package state
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -161,6 +159,22 @@ func LoadClient() (Client, error) {
 // Save writes the paired hubs.
 func (c Client) Save() error { return write("client.json", c) }
 
+// Forget drops hub and its key, and says whether it was there.
+func (c *Client) Forget(hub string) bool {
+	_, had := c.Keys[strings.ToLower(hub)]
+	delete(c.Keys, strings.ToLower(hub))
+	kept := c.Hubs[:0]
+	for _, h := range c.Hubs {
+		if strings.EqualFold(h, hub) {
+			had = true
+			continue
+		}
+		kept = append(kept, h)
+	}
+	c.Hubs = kept
+	return had
+}
+
 // Remember adds hub, with its key, to the paired hubs, and says whether
 // anything changed.
 func (c *Client) Remember(hub, key string) bool {
@@ -183,7 +197,8 @@ const keyPrefix = "ed25519:"
 // Key is this user's credlock key on this machine, made on first use and
 // readable only by them. A hub pairs with it, so another user on the same
 // machine, without it, can't ask in their name; and a hub proves itself with
-// its own, so another user on the hub's Mac can't answer in its place.
+// its own, which a paired machine checks, so another user on the hub's Mac
+// can't answer in its place.
 func Key() (ed25519.PrivateKey, error) {
 	dir, err := Dir()
 	if err != nil {
@@ -220,9 +235,14 @@ func Key() (ed25519.PrivateKey, error) {
 	return ed25519.NewKeyFromSeed(seed), nil
 }
 
-// PublicKey is how a key is sent and stored: "ed25519:…".
+// PublicKey is how a key is shown and stored: "ed25519:…".
 func PublicKey(priv ed25519.PrivateKey) string {
-	return keyPrefix + base64.StdEncoding.EncodeToString(priv.Public().(ed25519.PublicKey))
+	return EncodeKey(priv.Public().(ed25519.PublicKey))
+}
+
+// EncodeKey writes a public key as PublicKey does.
+func EncodeKey(pub ed25519.PublicKey) string {
+	return keyPrefix + base64.StdEncoding.EncodeToString(pub)
 }
 
 // ParsePublicKey reads a key PublicKey wrote.
@@ -232,41 +252,4 @@ func ParsePublicKey(s string) (ed25519.PublicKey, error) {
 		return nil, errors.New("not a credlock public key")
 	}
 	return ed25519.PublicKey(b), nil
-}
-
-// The handshake between another machine and a hub. The machine speaks first,
-// with a nonce. The hub answers with its key, a challenge, and its signature
-// over both (HubProof), which the machine checks before it says anything
-// about what it wants. The machine then signs the challenge, its nonce and
-// the hub's key (ClientProof) with its own key, and sends its request. Each
-// side has signed something fresh from the other, under a label of its own,
-// so neither signature can be replayed, or passed off as the other kind.
-const NonceSize = 32
-
-// HubProof is what a hub signs: the machine's nonce and its own challenge.
-func HubProof(nonce, challenge []byte) []byte {
-	return handshake("credlock hub proof v1", nonce, challenge)
-}
-
-// ClientProof is what the other machine signs: the hub's challenge, its own
-// nonce, and the key the hub proved itself with.
-func ClientProof(challenge, nonce []byte, hubKey string) []byte {
-	return handshake("credlock client proof v1", challenge, nonce, []byte(hubKey))
-}
-
-func handshake(label string, parts ...[]byte) []byte {
-	msg := []byte(label)
-	for _, p := range parts {
-		msg = binary.BigEndian.AppendUint32(append(msg, 0), uint32(len(p)))
-		msg = append(msg, p...)
-	}
-	return msg
-}
-
-// PairingCode is the four digits a hub's window and the other machine's
-// terminal both show for one pairing. It covers the handshake and both keys,
-// so the codes only match when each side saw the other's real key.
-func PairingCode(challenge, nonce []byte, clientKey, hubKey string) string {
-	sum := sha256.Sum256(handshake("credlock pairing code v1", challenge, nonce, []byte(clientKey), []byte(hubKey)))
-	return fmt.Sprintf("%04d", binary.BigEndian.Uint32(sum[:4])%10000)
 }

@@ -6,23 +6,26 @@ package client
 
 import (
 	"bufio"
+	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
 
-	"context"
+	"github.com/cdmckay/credlock/internal/channel"
 	"github.com/cdmckay/credlock/internal/config"
 	"github.com/cdmckay/credlock/internal/platform"
 	"github.com/cdmckay/credlock/internal/proto"
 	"github.com/cdmckay/credlock/internal/state"
-	"os/user"
 )
 
 // ExitDenied is the exit status when you deny a request (EX_NOPERM).
@@ -308,9 +311,9 @@ func firstNonEmpty(values ...string) string {
 // ones [client] hubs in the config names, for a machine without 1Password.
 // The key is made on first use; nothing else is kept here.
 func viaHubs(cfg config.Config, req proto.Request) (proto.Response, error) {
-	key, err := state.Key()
+	cert, err := machineCert()
 	if err != nil {
-		return proto.Response{}, fmt.Errorf("this machine's credlock key: %w", err)
+		return proto.Response{}, err
 	}
 	remembered, err := state.LoadClient()
 	if err != nil {
@@ -324,7 +327,8 @@ func viaHubs(cfg config.Config, req proto.Request) (proto.Response, error) {
 		return proto.Response{}, errors.New("this machine has no 1Password, and no Mac to ask for secrets. " +
 			"Pair it with a Mac on the tailnet, once: credlock pair MAC (the Mac needs credlock hub on)")
 	}
-	auth := hubAuth{key: key, user: currentUser(), pinned: remembered.Keys,
+	// A copy: calls still under way read it while Remember below writes.
+	auth := hubAuth{cert: cert, user: currentUser(), pinned: maps.Clone(remembered.Keys),
 		say: func(s string) { fmt.Fprintln(os.Stderr, s) }}
 	got, err := askHubs(hubs, req, auth)
 	if err == nil && len(got.resp.Values) > 0 && remembered.Remember(got.hub, got.key) {
@@ -334,29 +338,48 @@ func viaHubs(cfg config.Config, req proto.Request) (proto.Response, error) {
 }
 
 // Pair is `credlock pair MAC`, on a machine without 1Password: it pairs this
-// user here with a Mac on the tailnet, which asks you in its approval window,
-// and remembers the Mac, so credlock run asks it from then on.
+// user here with a Mac on the tailnet, which asks in its pairing window, and
+// remembers the Mac and its key, so credlock run asks it from then on. A Mac
+// that answers with a different key from the one it paired with is refused,
+// as credlock run refuses it: `credlock pair --forget MAC` drops the old key
+// on purpose, after a reinstall there.
 func Pair(args []string) int {
 	if platform.HasHelper {
 		return fail(errors.New("this Mac has its own helper and pairs nothing; to let other machines ask it, run credlock hub on"))
 	}
+	forget := len(args) == 2 && args[0] == "--forget"
+	if forget {
+		args = args[1:]
+	}
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
-		fmt.Fprintln(os.Stderr, "usage: credlock pair MAC, naming a Mac on the tailnet that has hub mode on")
+		fmt.Fprintln(os.Stderr, "usage: credlock pair MAC, naming a Mac on the tailnet that has hub mode on; or credlock pair --forget MAC")
 		return 2
 	}
 	hub := args[0]
-	key, err := state.Key()
+	remembered, err := state.LoadClient()
 	if err != nil {
-		return fail(fmt.Errorf("this machine's credlock key: %w", err))
+		return fail(err)
+	}
+	if forget {
+		if !remembered.Forget(hub) {
+			return fail(fmt.Errorf("this machine isn't paired with %s", hub))
+		}
+		if err := remembered.Save(); err != nil {
+			return fail(err)
+		}
+		fmt.Printf("credlock: forgot %s and its key. To pair again: credlock pair %s, and pair only if its window shows the code printed here.\n", hub, hub)
+		return 0
+	}
+	cert, err := machineCert()
+	if err != nil {
+		return fail(err)
 	}
 	host, _ := os.Hostname()
 	host, _, _ = strings.Cut(host, ".")
 	cwd, _ := os.Getwd()
-	// No pinned keys: pairing on purpose trusts the hub that answers, and its
-	// window has to show the same code.
-	auth := hubAuth{key: key, user: currentUser(),
+	auth := hubAuth{cert: cert, user: currentUser(), pinned: maps.Clone(remembered.Keys),
 		say: func(s string) { fmt.Fprintln(os.Stderr, s) }}
-	fmt.Fprintf(os.Stderr, "credlock: asking %s to pair; answer in its approval window.\n", hub)
+	fmt.Fprintf(os.Stderr, "credlock: asking %s to pair; answer in its pairing window.\n", hub)
 	resp, hubKey, err := callHub(context.Background(), hub, proto.Request{
 		Op:      proto.OpPair,
 		Reason:  fmt.Sprintf("pair %s on %s with %s", auth.user, host, hub),
@@ -373,14 +396,7 @@ func Pair(args []string) int {
 		fmt.Fprintf(os.Stderr, "credlock: %s denied the pairing.\n", hub)
 		return ExitDenied
 	case !resp.Paired:
-		return fail(errors.New("the hub didn't say whether it paired"))
-	}
-	remembered, err := state.LoadClient()
-	if err != nil {
-		return fail(err)
-	}
-	if old := remembered.Keys[strings.ToLower(hub)]; old != "" && old != hubKey {
-		fmt.Fprintf(os.Stderr, "credlock: %s has a different key from when it last paired, as it would after credlock was reinstalled there.\n", hub)
+		return fail(fmt.Errorf("%s didn't say whether it paired. Check that it runs a credlock as current as this one", hub))
 	}
 	if remembered.Remember(hub, hubKey) {
 		if err := remembered.Save(); err != nil {
@@ -389,6 +405,16 @@ func Pair(args []string) int {
 	}
 	fmt.Printf("credlock: paired with %s. credlock run asks it from now on.\n", hub)
 	return 0
+}
+
+// machineCert is this user's credlock key on this machine, made on first use,
+// in a certificate for TLS.
+func machineCert() (tls.Certificate, error) {
+	key, err := state.Key()
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("this machine's credlock key: %w", err)
+	}
+	return channel.Certificate(key)
 }
 
 func currentUser() string {

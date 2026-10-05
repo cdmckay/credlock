@@ -137,8 +137,10 @@ with the cost of each way around it.
   name-based to the tailnet it was set up on, and check the caller's full
   MagicDNS name.
 - **Tailscale proves which machine, not which process.** Any user on a Mac
-  can listen on an unprivileged port there while credlock isn't, so each side
-  proves itself with its own key before the other says anything that matters.
+  can listen on an unprivileged port there while credlock isn't. So the hub
+  connection is TLS 1.3 with each side's key pinned: a signature that isn't
+  tied to the connection can be relayed, and whatever relays it then reads
+  or writes the answer.
 - **`launchctl bootout` kills a loaded job's running process,** and after a
   login the running helper is launchd's. Reloading the login item would drop
   every approval, so credlock only writes or removes the file.
