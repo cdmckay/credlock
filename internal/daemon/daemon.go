@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/cdmckay/credlock/internal/approve"
+	"github.com/cdmckay/credlock/internal/client"
+	"github.com/cdmckay/credlock/internal/config"
 	"github.com/cdmckay/credlock/internal/menubar"
 	"github.com/cdmckay/credlock/internal/platform"
 	"github.com/cdmckay/credlock/internal/proto"
@@ -62,6 +64,16 @@ type Server struct {
 	// Bar is told what is held and how it is used, after every change. Nil
 	// for none.
 	Bar Notifier
+	// Identify names the tailnet host at a remote address: tailscale whois,
+	// unless a test fakes it.
+	Identify func(net.Addr) (string, error)
+	// Accounts lists this Mac's 1Password accounts, to resolve the --account
+	// a remote machine gives (it has no op of its own): client.Accounts.
+	Accounts func() []client.Account
+
+	// allow is every tailnet host that may ask, in lower case. A helper with
+	// any serves the tailnet as a hub, and stays up instead of idling out.
+	allow map[string]bool
 
 	mu       sync.Mutex // guards everything below
 	cache    *cache
@@ -85,6 +97,8 @@ func NewServer(p provider.Provider, a approve.Approver) *Server {
 		lastUsed: time.Now(),
 		names:    map[key]string{},
 		labels:   map[string]string{},
+		Identify: whois,
+		Accounts: client.Accounts,
 	}
 }
 
@@ -112,6 +126,14 @@ func Main(version string) error {
 	s.Exit = func() { _ = os.Remove(path); os.Exit(0) }
 	if menubar.Supported {
 		s.Bar = menubar.New(s.act)
+	}
+	// A broken config must not stop the helper serving this Mac, so it is
+	// reported and the tailnet left alone. `credlock run` reports it too.
+	if cfg, err := config.Load(); err != nil {
+		fmt.Fprintln(os.Stderr, "credlock helper:", err)
+	} else if len(cfg.Hub.Allow) > 0 {
+		s.Allow(cfg.Hub.Allow)
+		go s.serveTailnet(cfg.Hub.ListenPort(), time.Tick(time.Minute))
 	}
 	go s.reap(time.Tick(Sweep))
 	return s.Serve(ln)
@@ -164,12 +186,13 @@ func (s *Server) Serve(ln *net.UnixListener) error {
 
 // reap drops expired secrets on every tick and exits the helper once it has
 // gone IdleExit without a request. By then every secret has expired anyway.
+// A hub stays up: other machines may ask at any time.
 func (s *Server) reap(ticks <-chan time.Time) {
 	for range ticks {
 		s.mu.Lock()
 		now := s.Now()
 		s.cache.sweep(now)
-		idle := now.Sub(s.lastUsed) >= IdleExit
+		idle := now.Sub(s.lastUsed) >= IdleExit && len(s.allow) == 0
 		s.mu.Unlock()
 		s.notify(false) // times left, and anything that expired
 		if idle {
@@ -197,7 +220,10 @@ func (s *Server) handle(conn *net.UnixConn) {
 	}
 	switch req.Op {
 	case proto.OpResolve:
-		reply(conn, s.resolve(context.Background(), req, peer))
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go watchHangup(conn, cancel)
+		reply(conn, s.resolve(ctx, req, "", fmt.Sprintf("%s (pid %d)", peer.Name, peer.PID)))
 	case proto.OpStatus:
 		s.mu.Lock()
 		entries := s.cache.list(s.Now())
@@ -219,7 +245,11 @@ func (s *Server) handle(conn *net.UnixConn) {
 
 // resolve answers a request from what is already approved, and asks about the
 // rest before fetching it all from the provider in one call.
-func (s *Server) resolve(ctx context.Context, req proto.Request, peer platform.Peer) proto.Response {
+//
+// origin is who the approval is for: "" for this machine, or the tailnet host
+// that asked. requester is how the window names the asker. ctx ends when the
+// asker hangs up, which closes a window still waiting for an answer.
+func (s *Server) resolve(ctx context.Context, req proto.Request, origin, requester string) proto.Response {
 	if len(req.Secrets) == 0 {
 		return proto.Response{Error: "no secrets requested"}
 	}
@@ -229,14 +259,17 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, peer platform.P
 		}
 	}
 
-	values, missing := s.lookup(req)
+	values, missing := s.lookup(req, origin)
+	if len(missing) > 0 && req.NoPrompt {
+		return proto.Response{NotHeld: true}
+	}
 	asked := false
 	if len(missing) > 0 {
 		// One dialog at a time. Look again once it is our turn: the request
 		// ahead of us may have been approved for the same secrets.
 		s.asking.Lock()
 		defer s.asking.Unlock()
-		values, missing = s.lookup(req)
+		values, missing = s.lookup(req, origin)
 	}
 	if len(missing) > 0 {
 		asked = true
@@ -244,7 +277,7 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, peer platform.P
 			Reason:    req.Reason,
 			Command:   req.Command,
 			Cwd:       req.Cwd,
-			Requester: fmt.Sprintf("%s (pid %d)", peer.Name, peer.PID),
+			Requester: requester,
 			Account:   firstNonEmpty(req.AccountLabel, req.Account),
 			Secrets:   missing,
 			Approved:  len(uniqueRefs(req.Secrets)) - len(uniqueRefs(missing)),
@@ -254,6 +287,9 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, peer platform.P
 		if errors.Is(err, approve.ErrTimedOut) {
 			return proto.Response{Denied: true, TimedOut: true}
 		}
+		if ctx.Err() != nil {
+			return proto.Response{Error: "the asker hung up before you answered"}
+		}
 		if err != nil {
 			return proto.Response{Error: "showing the approval dialog: " + err.Error()}
 		}
@@ -261,14 +297,17 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, peer platform.P
 			return proto.Response{Denied: true}
 		}
 		refs := uniqueRefs(missing)
-		fetched, err := s.Provider.ResolveAll(ctx, req.Account, refs)
+		// Approved: finish the fetch even if the asker has gone, so the
+		// approval isn't wasted, and an account's resolver isn't killed
+		// halfway through.
+		fetched, err := s.Provider.ResolveAll(context.WithoutCancel(ctx), req.Account, refs)
 		if err != nil {
 			return proto.Response{Error: err.Error()}
 		}
 		s.mu.Lock()
 		now := s.Now()
 		for _, ref := range refs {
-			s.cache.put(key{req.Account, ref}, fetched[ref], now)
+			s.cache.put(key{origin, req.Account, ref}, fetched[ref], now)
 			values[ref] = fetched[ref]
 		}
 		s.mu.Unlock()
@@ -278,10 +317,10 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, peer platform.P
 	s.mu.Lock()
 	now := s.Now()
 	for ref := range values {
-		s.cache.touch(key{req.Account, ref}, now)
+		s.cache.touch(key{origin, req.Account, ref}, now)
 	}
 	s.lastUsed = now
-	s.logUse(req, asked, now)
+	s.logUse(req, origin, asked, now)
 	s.mu.Unlock()
 	s.notify(true)
 	return proto.Response{Values: values}
@@ -289,12 +328,12 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, peer platform.P
 
 // logUse records a delivery in the access log, and the names it used. The
 // caller holds s.mu.
-func (s *Server) logUse(req proto.Request, asked bool, now time.Time) {
+func (s *Server) logUse(req proto.Request, origin string, asked bool, now time.Time) {
 	s.labels[req.Account] = firstNonEmpty(req.AccountLabel, req.Account)
 	seen := map[string]bool{}
 	var names []string
 	for _, sec := range req.Secrets {
-		s.names[key{req.Account, sec.Ref}] = sec.Name
+		s.names[key{origin, req.Account, sec.Ref}] = sec.Name
 		if n := approve.Clean(sec.Name, 60); !seen[n] {
 			seen[n] = true
 			names = append(names, n)
@@ -306,6 +345,7 @@ func (s *Server) logUse(req proto.Request, asked bool, now time.Time) {
 		Reason:  approve.Clean(req.Reason, 120),
 		Names:   names,
 		Cached:  !asked,
+		Origin:  origin,
 	}
 	s.uses = append([]menubar.Use{use}, s.uses...)
 	if len(s.uses) > maxUses {
@@ -323,10 +363,11 @@ func (s *Server) notify(read bool) {
 	now := s.Now()
 	snap := menubar.Snapshot{Read: read, Uses: append([]menubar.Use(nil), s.uses...)}
 	for _, e := range s.cache.list(now) {
-		k := key{e.Account, e.Ref}
+		k := key{e.Origin, e.Account, e.Ref}
 		snap.Held = append(snap.Held, menubar.Held{
 			AccountID: e.Account,
 			Account:   approve.Clean(firstNonEmpty(s.labels[e.Account], e.Account), 100),
+			Origin:    e.Origin,
 			Name:      approve.Clean(firstNonEmpty(s.names[k], e.Ref), 60),
 			Ref:       approve.Clean(e.Ref, 200),
 			Left:      left(time.Duration(e.ExpiresIn) * time.Second),
@@ -347,7 +388,7 @@ func (s *Server) act(a menubar.Action) {
 	switch a.Op {
 	case menubar.OpForget:
 		s.mu.Lock()
-		s.cache.forget(key{a.AccountID, a.Ref})
+		s.cache.forget(key{a.Origin, a.AccountID, a.Ref})
 		s.mu.Unlock()
 		s.notify(false)
 	case menubar.OpForgetAll:
@@ -373,7 +414,7 @@ func left(d time.Duration) string {
 }
 
 // lookup splits a request into what is already approved and what is not.
-func (s *Server) lookup(req proto.Request) (map[string]string, []proto.Secret) {
+func (s *Server) lookup(req proto.Request, origin string) (map[string]string, []proto.Secret) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.Now()
@@ -381,7 +422,7 @@ func (s *Server) lookup(req proto.Request) (map[string]string, []proto.Secret) {
 	values := map[string]string{}
 	var missing []proto.Secret
 	for _, sec := range req.Secrets {
-		if v, ok := s.cache.peek(key{req.Account, sec.Ref}, now); ok {
+		if v, ok := s.cache.peek(key{origin, req.Account, sec.Ref}, now); ok {
 			values[sec.Ref] = v
 		} else {
 			missing = append(missing, sec)
@@ -409,6 +450,14 @@ func uniqueRefs(secrets []proto.Secret) []string {
 		}
 	}
 	return refs
+}
+
+// watchHangup cancels once the asker closes its connection. It sends nothing
+// after its request, so any read returning means it has gone.
+func watchHangup(conn net.Conn, cancel func()) {
+	var b [1]byte
+	_, _ = conn.Read(b[:])
+	cancel()
 }
 
 func reply(conn net.Conn, resp proto.Response) {

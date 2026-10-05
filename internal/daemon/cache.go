@@ -7,9 +7,11 @@ import (
 	"github.com/cdmckay/credlock/internal/proto"
 )
 
-// key is one secret in one account: the same reference can exist in two.
+// key is one secret in one account, approved for one origin: "" for this
+// machine, or the tailnet host that asked. The same reference can exist in two
+// accounts, and an approval for papaya is not one for this Mac, or the reverse.
 type key struct {
-	account, ref string
+	origin, account, ref string
 }
 
 type entry struct {
@@ -84,7 +86,7 @@ func (c *cache) list(now time.Time) []proto.Entry {
 	var out []proto.Entry
 	for k, e := range c.entries {
 		if now.Before(e.expires) {
-			out = append(out, proto.Entry{Account: k.account, Ref: k.ref, ExpiresIn: int64(e.expires.Sub(now).Seconds())})
+			out = append(out, proto.Entry{Origin: k.origin, Account: k.account, Ref: k.ref, ExpiresIn: int64(e.expires.Sub(now).Seconds())})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

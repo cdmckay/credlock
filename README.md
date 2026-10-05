@@ -48,6 +48,43 @@ account the SDK calls it `Personal` (`op` also takes `Private`), while in
 1Password Business the SDK calls it `Private` (the app and `op` show
 `Employee`). A `vaultNotFound` error lists the account's vaults.
 
+## Other machines on your tailnet
+
+A machine without 1Password, such as a Linux server, can still use
+`credlock run`: it asks a Mac on the same Tailscale network, which shows its
+approval window, fetches from 1Password, and sends the values back over the
+tailnet. The other machine keeps nothing; every run asks again, and a Mac
+that holds an approval for it answers without a window.
+
+On each machine, `~/.config/credlock/config.toml` (or the file
+`$CREDLOCK_CONFIG` names) says what it does:
+
+```toml
+# On the machine without 1Password: the Macs to ask, all at once.
+[client]
+hubs = ["potato", "tomato"]
+
+# On a Mac: the tailnet machines it answers. Each is checked with
+# `tailscale whois`, so a machine can't claim to be another.
+[hub]
+allow = ["papaya", "banana"]
+```
+
+- **Every hub is asked at once.** First credlock asks each hub only for what
+  it already holds. If one does, that answer is used, and no window opens
+  anywhere. Otherwise every hub shows its window, and the first Allow or Deny
+  wins; the other windows close. A hub that's offline, or whose window nobody
+  answers, doesn't count.
+- **Approvals are kept per machine.** What you allow for papaya is papaya's
+  alone, and nothing this Mac approved for itself is served to papaya. The
+  window, the menu bar and `credlock status` say which machine each is for.
+- **A hub listens only on its Tailscale addresses**, port 7177 by default
+  (`port` under `[hub]`), and serves nothing there but resolving. It stays
+  running instead of idling out, since another machine may ask at any time.
+- **Tailscale identifies machines, not people.** Any process on papaya can
+  ask as papaya. New secrets still need your click, but what you've approved
+  for papaya is served to it for the hour.
+
 ## Commands
 
 | Command | What it does |

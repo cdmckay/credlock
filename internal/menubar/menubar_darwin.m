@@ -40,7 +40,12 @@ static void sendAction(NSDictionary *action) {
 @implementation CLTarget
 - (void)forget:(NSMenuItem *)sender {
   NSDictionary *held = sender.representedObject;
-  sendAction(@{@"op" : @"forget", @"account_id" : str(held, @"account_id"), @"ref" : str(held, @"ref")});
+  sendAction(@{
+    @"op" : @"forget",
+    @"account_id" : str(held, @"account_id"),
+    @"ref" : str(held, @"ref"),
+    @"origin" : str(held, @"origin")
+  });
 }
 - (void)forgetAll:(id)sender {
   sendAction(@{@"op" : @"forget_all"});
@@ -157,7 +162,11 @@ static NSMenuItem *note(NSString *title) {
 // logEntry is one use: when and what, then why, then which secrets.
 static NSMenuItem *logEntry(NSDictionary *use) {
   NSMutableAttributedString *t = [NSMutableAttributedString new];
-  NSString *when = [NSString stringWithFormat:@"%@  %@", str(use, @"at"), str(use, @"command")];
+  // Another machine's use says which: "14:02  papaya · in-api.sh".
+  NSString *origin = str(use, @"origin");
+  NSString *when = origin.length
+                       ? [NSString stringWithFormat:@"%@  %@ · %@", str(use, @"at"), origin, str(use, @"command")]
+                       : [NSString stringWithFormat:@"%@  %@", str(use, @"at"), str(use, @"command")];
   [t appendAttributedString:[[NSAttributedString alloc]
                                 initWithString:when
                                     attributes:@{NSFontAttributeName : [NSFont menuFontOfSize:13]}]];
@@ -187,8 +196,12 @@ static NSMenuItem *logEntry(NSDictionary *use) {
 static NSMenuItem *heldEntry(NSDictionary *held) {
   NSMutableParagraphStyle *p = [NSMutableParagraphStyle new];
   p.tabStops = @[ [[NSTextTab alloc] initWithTextAlignment:NSTextAlignmentRight location:300 options:@{}] ];
+  // A secret held for another machine says which: "IN_TOKEN · papaya".
+  NSString *name = str(held, @"origin").length
+                       ? [NSString stringWithFormat:@"%@ · %@", str(held, @"name"), str(held, @"origin")]
+                       : str(held, @"name");
   NSMutableAttributedString *t = [[NSMutableAttributedString alloc]
-      initWithString:str(held, @"name")
+      initWithString:name
           attributes:@{NSFontAttributeName : [NSFont monospacedSystemFontOfSize:12.5 weight:NSFontWeightMedium],
                        NSParagraphStyleAttributeName : p}];
   [t appendAttributedString:[[NSAttributedString alloc]

@@ -30,9 +30,10 @@ type Snapshot struct {
 
 // Held is one approved secret.
 type Held struct {
-	AccountID string `json:"account_id"` // for forgetting it
-	Account   string `json:"account"`    // for showing, e.g. "my.1password.com (me@example.com)"
-	Name      string `json:"name"`       // the variable it was last delivered as
+	AccountID string `json:"account_id"`       // for forgetting it
+	Account   string `json:"account"`          // for showing, e.g. "my.1password.com (me@example.com)"
+	Origin    string `json:"origin,omitempty"` // the tailnet host it is approved for; empty for this machine
+	Name      string `json:"name"`             // the variable it was last delivered as
 	Ref       string `json:"ref"`
 	Left      string `json:"left"` // e.g. "48 min left"
 }
@@ -45,6 +46,8 @@ type Use struct {
 	Names   []string `json:"names"`
 	// Cached means every secret came from an earlier approval, with no window.
 	Cached bool `json:"cached"`
+	// Origin is the tailnet host that asked; empty for this machine.
+	Origin string `json:"origin,omitempty"`
 }
 
 // Action is something done from the menu.
@@ -52,6 +55,7 @@ type Action struct {
 	Op        string `json:"op"` // one of the Op constants
 	AccountID string `json:"account_id,omitempty"`
 	Ref       string `json:"ref,omitempty"`
+	Origin    string `json:"origin,omitempty"`
 }
 
 // Menu actions. Each takes access away; none can grant it.

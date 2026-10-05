@@ -30,6 +30,11 @@ type Request struct {
 	Command      []string `json:"command,omitempty"`
 	Cwd          string   `json:"cwd,omitempty"`
 	Secrets      []Secret `json:"secrets,omitempty"`
+	// NoPrompt asks only for what is already approved: a request that needs
+	// a new approval gets NotHeld instead of a window. A client asking several
+	// hubs uses it first, so a hub that holds the secrets answers before any
+	// window opens elsewhere.
+	NoPrompt bool `json:"no_prompt,omitempty"`
 }
 
 // Entry describes one approved secret for `credlock status`. It never carries
@@ -38,6 +43,8 @@ type Entry struct {
 	Account   string `json:"account"`
 	Ref       string `json:"ref"`
 	ExpiresIn int64  `json:"expires_in"` // seconds
+	// Origin is the tailnet host the approval is for; empty for this machine.
+	Origin string `json:"origin,omitempty"`
 }
 
 // Response is the helper's answer.
@@ -45,8 +52,10 @@ type Response struct {
 	Values map[string]string `json:"values,omitempty"` // by reference
 	Denied bool              `json:"denied,omitempty"`
 	// TimedOut marks a denial because nobody answered the dialog.
-	TimedOut bool    `json:"timed_out,omitempty"`
-	Error    string  `json:"error,omitempty"`
-	Entries  []Entry `json:"entries,omitempty"`
-	PID      int     `json:"pid,omitempty"`
+	TimedOut bool `json:"timed_out,omitempty"`
+	// NotHeld answers a NoPrompt request that needs a new approval.
+	NotHeld bool    `json:"not_held,omitempty"`
+	Error   string  `json:"error,omitempty"`
+	Entries []Entry `json:"entries,omitempty"`
+	PID     int     `json:"pid,omitempty"`
 }

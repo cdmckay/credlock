@@ -12,6 +12,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// HasHelper says whether this system runs a credlock helper. Without one,
+// credlock asks the hubs in its config instead.
+const HasHelper = true
+
 // SocketPath is the helper's socket, inside ~/Library/Caches/credlock, which
 // is made private on every call. Never a shared directory like /tmp, where
 // another user could plant a socket first and collect whatever is sent to it.

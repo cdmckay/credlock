@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cdmckay/credlock/internal/config"
 	"github.com/cdmckay/credlock/internal/platform"
 	"github.com/cdmckay/credlock/internal/proto"
 )
@@ -122,12 +123,16 @@ func Run(args []string) int {
 			"Set them for the command, e.g. TOKEN='op://Vault/Item/field' credlock run ... (see 'credlock help run')\n", r.Command[0])
 	}
 	if len(secrets) > 0 {
+		cfg, err := config.Load()
+		if err != nil {
+			return fail(err)
+		}
 		account, label, err := ResolveAccount(r.Account, Accounts())
 		if err != nil {
 			return fail(err)
 		}
 		cwd, _ := os.Getwd()
-		resp, err := Call(proto.Request{
+		req := proto.Request{
 			Op:           proto.OpResolve,
 			Account:      account,
 			AccountLabel: label,
@@ -135,7 +140,19 @@ func Run(args []string) int {
 			Command:      r.Command,
 			Cwd:          cwd,
 			Secrets:      secrets,
-		}, true)
+		}
+		var resp proto.Response
+		switch {
+		case platform.HasHelper:
+			resp, err = Call(req, true)
+		case len(cfg.Client.Hubs) > 0:
+			// No 1Password here: a Mac on the tailnet asks you, and sends
+			// the values back. Nothing is kept on this machine.
+			resp, err = askHubs(cfg.Client.Hubs, req)
+		default:
+			err = fmt.Errorf("this machine has no credlock helper (that needs the 1Password app), and no hubs to ask. "+
+				"Add [client] hubs = [\"potato\"], naming a Mac on the tailnet that runs one, to %s", config.Path())
+		}
 		if err != nil {
 			return fail(err)
 		}
@@ -180,7 +197,11 @@ func Status() int {
 		if label, ok := names[e.Account]; ok {
 			account = label
 		}
-		fmt.Printf("  %s  in %s, expires in %s\n", e.Ref, account, (time.Duration(e.ExpiresIn) * time.Second).Round(time.Minute))
+		forWhom := ""
+		if e.Origin != "" {
+			forWhom = ", for " + e.Origin
+		}
+		fmt.Printf("  %s  in %s%s, expires in %s\n", e.Ref, account, forWhom, (time.Duration(e.ExpiresIn) * time.Second).Round(time.Minute))
 	}
 	return 0
 }
