@@ -35,6 +35,10 @@ type Client struct {
 
 // Hub is for a Mac that resolves secrets for other machines on the tailnet.
 type Hub struct {
+	// Tailnet is the tailnet the names in Allow belong to, e.g. "cdmckay.org".
+	// The hub serves only while this Mac is on it: a name means nothing on
+	// another tailnet, where anyone could have a device called "papaya".
+	Tailnet string `toml:"tailnet"`
 	// Allow is every tailnet host that may ask, by its Tailscale name. A hub
 	// with none listens only on its local socket.
 	Allow []string `toml:"allow"`
@@ -79,6 +83,9 @@ func Load() (Config, error) {
 			keys[i] = k.String()
 		}
 		return Config{}, fmt.Errorf("%s: unknown setting %s", path, strings.Join(keys, ", "))
+	}
+	if len(c.Hub.Allow) > 0 && c.Hub.Tailnet == "" {
+		return Config{}, fmt.Errorf(`%s: hub.allow needs hub.tailnet, the tailnet those names belong to (e.g. tailnet = "cdmckay.org", as 'tailscale switch --list' shows it)`, path)
 	}
 	if c.Hub.Port < 0 || c.Hub.Port > 65535 {
 		return Config{}, fmt.Errorf("%s: hub.port %d is not a port", path, c.Hub.Port)

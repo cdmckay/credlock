@@ -68,12 +68,19 @@ type Server struct {
 	// unless a test fakes it.
 	Identify func(net.Addr) (string, error)
 	// Accounts lists this Mac's 1Password accounts, to resolve the --account
-	// a remote machine gives (it has no op of its own): client.Accounts.
+	// a remote machine gives (it has no op of its own). The hub keeps the
+	// first list it gets: op waits while 1Password is locked, and a request
+	// the cache can answer mustn't.
 	Accounts func() []client.Account
 
 	// allow is every tailnet host that may ask, in lower case. A helper with
 	// any serves the tailnet as a hub, and stays up instead of idling out.
 	allow map[string]bool
+	// suffix is the MagicDNS domain of the tailnet the hub serves, while it
+	// serves one; callers must be in it.
+	suffix string
+	// known is the account list, once Accounts has given one.
+	known []client.Account
 
 	mu       sync.Mutex // guards everything below
 	cache    *cache
@@ -87,7 +94,7 @@ type Server struct {
 
 // NewServer makes a server with credlock's lifetimes.
 func NewServer(p provider.Provider, a approve.Approver) *Server {
-	return &Server{
+	s := &Server{
 		Provider: p,
 		Approver: a,
 		Now:      time.Now,
@@ -97,9 +104,10 @@ func NewServer(p provider.Provider, a approve.Approver) *Server {
 		lastUsed: time.Now(),
 		names:    map[key]string{},
 		labels:   map[string]string{},
-		Identify: whois,
-		Accounts: client.Accounts,
+		Accounts: func() []client.Account { return client.AccountsWithin(5 * time.Second) },
 	}
+	s.Identify = s.identify
+	return s
 }
 
 // Main runs the helper on the user's socket until it idles out or is stopped.
@@ -133,7 +141,7 @@ func Main(version string) error {
 		fmt.Fprintln(os.Stderr, "credlock helper:", err)
 	} else if len(cfg.Hub.Allow) > 0 {
 		s.Allow(cfg.Hub.Allow)
-		go s.serveTailnet(cfg.Hub.ListenPort(), time.Tick(time.Minute))
+		go s.serveTailnet(cfg.Hub, time.Tick(time.Minute))
 	}
 	go s.reap(time.Tick(Sweep))
 	return s.Serve(ln)

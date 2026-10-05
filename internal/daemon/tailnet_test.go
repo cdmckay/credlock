@@ -134,11 +134,50 @@ func (p *recordAccount) got() string {
 	return p.account
 }
 
+func TestTheAccountListIsFetchedOnce(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	r := newRemote(t, "papaya", func(s *Server) {
+		s.Accounts = func() []client.Account {
+			mu.Lock()
+			defer mu.Unlock()
+			calls++
+			return []client.Account{{ID: "ACMEACCOUNTID", Email: "me@acme.example", URL: "acme.1password.com"}}
+		}
+	})
+	for range 3 {
+		r.ask(resolveReq("acme", sec("A", "op://v/a/f")))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("op was asked %d times", calls)
+	}
+}
+
 func TestAMachineNotAllowedIsRefused(t *testing.T) {
 	r := newRemote(t, "mango")
 	resp := r.ask(resolveReq("acme", sec("A", "op://v/a/f")))
 	if !strings.Contains(resp.Error, "mango is not in this hub's allow list") || len(r.h.approver.dialogs()) != 0 {
 		t.Fatalf("got %+v", resp)
+	}
+}
+
+func TestOnlyDevicesOfTheHubsTailnetAreNamed(t *testing.T) {
+	for fqdn, want := range map[string]string{
+		"papaya.tail1234.ts.net.":     "papaya",
+		"Papaya.Tail1234.ts.net":      "papaya",
+		"papaya.other99.ts.net.":      "", // another tailnet
+		"papaya.sub.tail1234.ts.net.": "", // not directly in it
+		"tail1234.ts.net.":            "", // no device name
+	} {
+		got, ok := inTailnet(fqdn, "tail1234.ts.net")
+		if got != want || ok != (want != "") {
+			t.Errorf("inTailnet(%q) = %q, %v; want %q", fqdn, got, ok, want)
+		}
+	}
+	if _, ok := inTailnet("papaya.tail1234.ts.net.", ""); ok {
+		t.Error("a hub serving no tailnet named a device")
 	}
 }
 

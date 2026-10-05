@@ -22,6 +22,7 @@ func TestBothRolesRead(t *testing.T) {
 hubs = ["potato", "tomato:9000"]
 
 [hub]
+tailnet = "example.org"
 allow = ["papaya", "banana"]
 port = 7200
 `)
@@ -45,6 +46,13 @@ func TestNoFileIsNoSettings(t *testing.T) {
 func TestATypoIsAnError(t *testing.T) {
 	write(t, "[hub]\nalow = [\"papaya\"]\n")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "hub.alow") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestAllowNeedsATailnet(t *testing.T) {
+	write(t, "[hub]\nallow = [\"papaya\"]\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "hub.tailnet") {
 		t.Fatalf("got %v", err)
 	}
 }

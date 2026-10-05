@@ -64,9 +64,11 @@ On each machine, `~/.config/credlock/config.toml` (or the file
 [client]
 hubs = ["potato", "tomato"]
 
-# On a Mac: the tailnet machines it answers. Each is checked with
-# `tailscale whois`, so a machine can't claim to be another.
+# On a Mac: the tailnet it serves, and the machines on it that it answers.
+# Each caller is checked with `tailscale whois`, so a machine can't claim to
+# be another.
 [hub]
+tailnet = "example.org"
 allow = ["papaya", "banana"]
 ```
 
@@ -81,6 +83,14 @@ allow = ["papaya", "banana"]
 - **A hub listens only on its Tailscale addresses**, port 7177 by default
   (`port` under `[hub]`), and serves nothing there but resolving. It stays
   running instead of idling out, since another machine may ask at any time.
+- **A name only counts on its own tailnet.** The hub listens only while the
+  Mac is on the tailnet named in `tailnet`, as `tailscale switch --list`
+  shows it, and a caller's full Tailscale name must be in that tailnet's
+  domain. On another tailnet, anyone could have a device called "papaya".
+- **Account names are resolved on the hub,** since the other machine has no
+  `op`. The hub asks `op` for its account list once and keeps it. While
+  1Password is locked, `op` can't list accounts, so a hub that hasn't got the
+  list yet accepts only an account ID.
 - **Tailscale identifies machines, not people.** Any process on papaya can
   ask as papaya. New secrets still need your click, but what you've approved
   for papaya is served to it for the hour.

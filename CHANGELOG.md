@@ -12,9 +12,9 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 - Machines without 1Password, such as Linux servers on the same Tailscale
   network, can use `credlock run`. They ask the Macs listed under
   `[client] hubs` in `~/.config/credlock/config.toml`, all at once. A Mac
-  answers the machines listed under its `[hub] allow`, checking each with
-  `tailscale whois`, shows its usual approval window, and sends the values
-  back over the tailnet. The other machine keeps nothing. Approvals are kept
+  answers the machines listed under its `[hub] allow`, on the tailnet named
+  in its `[hub] tailnet` only, checking each with `tailscale whois`. It shows
+  its usual approval window, and sends the values back over the tailnet. The other machine keeps nothing. Approvals are kept
   per machine, and the window, the menu bar and `credlock status` say which
   machine each is for.
 - A request whose asker goes away, such as a `credlock run` stopped with
