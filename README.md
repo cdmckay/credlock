@@ -66,6 +66,11 @@ that holds an approval for it answers without a window.
    there. (Or set `[client] hubs = ["potato"]` in `~/.config/credlock/config.toml`,
    and the first request pairs in its own window.)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/pairing-window-dark.png">
+  <img src="docs/images/pairing-window-light.png" width="540" alt="The pairing window: 'Pair me on papaya with this Mac?', with the four-digit code large in a purple card, who is asking, the command and directory, and Don't pair and Pair buttons.">
+</picture>
+
 How it's kept safe:
 
 - **Tailscale says which machine is asking**, and the hub only listens on
