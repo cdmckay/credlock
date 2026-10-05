@@ -52,8 +52,10 @@ type View struct {
 	// OriginTone colours the card: "remote" for a paired machine, "pair" for
 	// a first pairing.
 	OriginTone string `json:"origin_tone,omitempty"`
-	// Code is a pairing's four digits, shown large in the card, with CodeNote
-	// under them.
+	// Kind is "pair" for the pairing window, laid out unlike an approval so
+	// it isn't answered by habit, with Code large and CodeNote under it. It
+	// never shows secrets: those are asked about after, in an approval.
+	Kind     string `json:"kind,omitempty"`
 	Code     string `json:"code,omitempty"`
 	CodeNote string `json:"code_note,omitempty"`
 }
@@ -104,25 +106,14 @@ func NewView(r Request, timeout time.Duration) View {
 		v.OriginTone = "remote"
 		v.OriginTitle = fmt.Sprintf("From %s, another machine on your tailnet", origin)
 		v.OriginNote = fmt.Sprintf("Tailscale verified that this request comes from %s. The command, directory and reason are what %s reports. If you allow it, the values are sent to %s.", origin, origin, origin)
-		switch {
-		case r.Pairing == "new" && n == 0:
-			// Only pairing, from `credlock pair`: no secrets involved.
-			v.Title = "Pairing request from " + origin
-			v.Question = fmt.Sprintf("Pair %s with this Mac?", who)
-			v.Account = "none: this only pairs"
-			v.Lifetime = fmt.Sprintf("until you unpair it: credlock hub forget %s", origin)
-			v.Footer = fmt.Sprintf("Pairing sends no secrets. Each one %s asks for later still needs your Allow.", origin)
-			v.OriginTone = "pair"
-			v.OriginTitle = fmt.Sprintf("%s wants to pair with this Mac", who)
-			v.OriginNote = "It hasn't asked this Mac before. If its terminal shows the same code, Allow pairs it. Deny if you didn't just run something there."
-		case r.Pairing == "new":
-			v.OriginTone = "pair"
-			v.OriginTitle = fmt.Sprintf("%s wants to pair with this Mac", who)
-			v.OriginNote = fmt.Sprintf("It hasn't asked this Mac before. If its terminal shows the same code, Allow pairs it and sends the values to %s. Deny if you didn't just run something there.", origin)
-		}
 		if r.Pairing == "new" {
+			v.Kind = "pair"
+			v.Title = fmt.Sprintf("Pair %s with this Mac?", who)
+			v.Subtitle = "credlock · pairing a machine"
+			v.OriginNote = fmt.Sprintf("%s hasn't asked this Mac before. Once paired, it can ask for secrets, and each new one still needs your Allow.", who)
 			v.Code = code
-			v.CodeNote = fmt.Sprintf("Check that %s's terminal shows this code", origin)
+			v.CodeNote = fmt.Sprintf("Pair only if %s's terminal shows this code", origin)
+			v.Footer = "Pairing sends no secrets."
 		}
 	}
 	return v

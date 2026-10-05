@@ -65,19 +65,17 @@ func TestARemoteRequestSaysSoFirst(t *testing.T) {
 	}
 }
 
-func TestAPairingSaysSoAndShowsItsCode(t *testing.T) {
+func TestAPairingIsAWindowOfItsOwn(t *testing.T) {
 	r := sample
 	r.Origin, r.Requester, r.Pairing, r.Code = "papaya", "me on papaya, over Tailscale", "new", "4821"
+	r.Secrets, r.Approved = nil, 0
 	v := NewView(r, time.Minute)
-	if v.OriginTone != "pair" || v.OriginTitle != "me on papaya wants to pair with this Mac" || v.Code != "4821" ||
-		!strings.Contains(v.CodeNote, "papaya's terminal") || !strings.Contains(v.OriginNote, "sends the values") {
+	if v.Kind != "pair" || v.Title != "Pair me on papaya with this Mac?" || v.Code != "4821" ||
+		!strings.Contains(v.CodeNote, "papaya's terminal") || v.Footer != "Pairing sends no secrets." {
 		t.Fatalf("%+v", v)
 	}
-	r.Secrets, r.Approved = nil, 0
-	only := NewView(r, time.Minute)
-	if only.Title != "Pairing request from papaya" || only.Question != "Pair me on papaya with this Mac?" ||
-		strings.Contains(only.OriginNote, "values") || !strings.Contains(only.Footer, "sends no secrets") {
-		t.Fatalf("pairing alone: %+v", only)
+	if plain := NewView(sample, time.Minute); plain.Kind != "" || plain.Code != "" {
+		t.Fatalf("an approval looked like a pairing: %+v", plain)
 	}
 }
 

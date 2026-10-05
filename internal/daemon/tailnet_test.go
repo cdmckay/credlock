@@ -124,10 +124,15 @@ func TestAFirstRequestPairsInItsWindowAndThenNeedsNone(t *testing.T) {
 	if resp.Error != "" || resp.Values[a.Ref] != "secret:"+a.Ref {
 		t.Fatalf("first request: %+v", resp)
 	}
+	// Two windows, one job each: the pairing, with no secrets in it, then the
+	// approval, with no pairing in it.
 	shown := r.h.approver.dialogs()
-	if len(shown) != 1 || shown[0].Pairing != "new" || shown[0].Code != code || shown[0].Origin != "papaya" ||
-		shown[0].Requester != "me on papaya, over Tailscale" || shown[0].Account != "acme.1password.com (me@acme.example)" {
-		t.Fatalf("the window showed %+v (code %s)", shown, code)
+	if len(shown) != 2 || shown[0].Pairing != "new" || shown[0].Code != code || len(shown[0].Secrets) != 0 ||
+		shown[0].Origin != "papaya" || shown[0].Requester != "me on papaya, over Tailscale" {
+		t.Fatalf("the pairing window showed %+v (code %s)", shown, code)
+	}
+	if shown[1].Pairing != "" || len(shown[1].Secrets) != 1 || shown[1].Account != "acme.1password.com (me@acme.example)" {
+		t.Fatalf("the approval window showed %+v", shown[1])
 	}
 	if p := r.peers()["me@papaya"]; p.Key != state.PublicKey(key) {
 		t.Fatalf("not paired: %+v", r.peers())
@@ -137,12 +142,12 @@ func TestAFirstRequestPairsInItsWindowAndThenNeedsNone(t *testing.T) {
 	if resp, _ := r.ask(key, "me", resolveReq("acme", a)); resp.Values[a.Ref] == "" {
 		t.Fatalf("second request: %+v", resp)
 	}
-	if n := len(r.h.approver.dialogs()); n != 1 {
-		t.Fatalf("%d windows for a paired, approved request", n)
+	if n := len(r.h.approver.dialogs()); n != 2 {
+		t.Fatalf("%d windows after a paired, approved request again", n)
 	}
 	// A new secret asks again, without pairing.
 	r.ask(key, "me", resolveReq("acme", sec("B", "op://v/b/f")))
-	if shown := r.h.approver.dialogs(); len(shown) != 2 || shown[1].Pairing != "" {
+	if shown := r.h.approver.dialogs(); len(shown) != 3 || shown[2].Pairing != "" {
 		t.Fatalf("a paired machine's new secret: %+v", shown)
 	}
 }
@@ -166,7 +171,7 @@ func TestAKeyThatDoesntMatchIsRefusedAndRaisesAnAlert(t *testing.T) {
 	if !strings.Contains(resp.Error, "different key") || !strings.Contains(resp.Error, "credlock hub forget papaya") {
 		t.Fatalf("got %+v", resp)
 	}
-	if n := len(r.h.approver.dialogs()); n != 1 {
+	if n := len(r.h.approver.dialogs()); n != 2 {
 		t.Fatalf("a mismatched key reached a window (%d windows)", n)
 	}
 	if got := r.alerts(); len(got) != 1 || !strings.Contains(got[0], "possibly an attack") {
@@ -267,7 +272,7 @@ func TestARemoteMachineIsApprovedApartFromThisMac(t *testing.T) {
 	if err != nil || local.Values[a.Ref] == "" {
 		t.Fatalf("local: %+v, %v", local, err)
 	}
-	if n := len(r.h.approver.dialogs()); n != 2 {
+	if n := len(r.h.approver.dialogs()); n != 3 {
 		t.Fatalf("this Mac used papaya's approval: %d windows", n)
 	}
 }
@@ -360,7 +365,7 @@ func TestForgettingAMachineUnpairsItAndDropsWhatItHeld(t *testing.T) {
 	}
 	// It pairs again as new.
 	r.ask(key, "me", resolveReq("acme", sec("A", "op://v/a/f")))
-	if shown := r.h.approver.dialogs(); len(shown) != 2 || shown[1].Pairing != "new" {
+	if shown := r.h.approver.dialogs(); len(shown) != 4 || shown[2].Pairing != "new" || shown[3].Pairing != "" {
 		t.Fatalf("after forget: %+v", shown)
 	}
 }

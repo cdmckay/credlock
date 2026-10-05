@@ -65,7 +65,7 @@ func readView(r io.Reader) (string, error) {
 	if err := json.Unmarshal(data, &v); err != nil {
 		return "", fmt.Errorf("reading the approval window's content: %w", err)
 	}
-	if (len(v.Secrets) == 0 && v.Origin == "") || v.Timeout <= 0 {
+	if (len(v.Secrets) == 0 && v.Kind != "pair") || v.Timeout <= 0 {
 		return "", errors.New("the approval window was started without secrets or a timeout")
 	}
 	out, err := json.Marshal(v)

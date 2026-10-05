@@ -225,11 +225,22 @@ func (s *Server) handleRemote(conn net.Conn) {
 		return
 	}
 	req.Account, req.AccountLabel = accountID, label
-	resp := s.resolve(ctx, req, from)
 	if from.pairing != "" {
+		if req.NoPrompt {
+			reply(conn, proto.Response{NotHeld: true}) // a check never opens a window
+			return
+		}
+		// One window, one job: pair first, in the pairing window, and only
+		// then ask about the secrets, in the usual one.
+		resp := s.pairOnly(ctx, req, from)
 		s.countPairing(host, resp)
+		if !resp.Paired {
+			reply(conn, resp)
+			return
+		}
+		from.pairing, from.code, from.pair = "", "", nil
 	}
-	reply(conn, resp)
+	reply(conn, s.resolve(ctx, req, from))
 }
 
 // pairOnly asks the person whether to pair a machine user, with no secrets
@@ -247,7 +258,7 @@ func (s *Server) pairOnly(ctx context.Context, req proto.Request, from asker) pr
 		Code:      from.code,
 		Window:    Window,
 		Cap:       Cap,
-	})
+	}) // no Secrets: the pairing window shows none, whatever the request wants
 	switch {
 	case errors.Is(err, approve.ErrTimedOut):
 		return proto.Response{Denied: true, TimedOut: true}

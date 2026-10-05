@@ -56,11 +56,9 @@ func snapshots(dir string) error {
 	pairing := remote
 	pairing.Requester = "me on papaya, over Tailscale"
 	pairing.Pairing, pairing.Code = "new", "4821"
-	pairOnly := pairing
-	pairOnly.Secrets, pairOnly.Approved = nil, 0
-	pairOnly.Reason = "pair me on papaya with potato"
-	pairOnly.Command = []string{"credlock", "pair", "potato"}
-	for name, r := range map[string]Request{"one": one, "two": sample, "many": long, "remote": remote, "pairing": pairing, "pair-only": pairOnly} {
+	pairing.Secrets, pairing.Approved = nil, 0
+	pairing.Command = []string{"credlock", "pair", "potato"}
+	for name, r := range map[string]Request{"one": one, "two": sample, "many": long, "remote": remote, "pairing": pairing} {
 		for _, dark := range []bool{false, true} {
 			mode := "light"
 			if dark {

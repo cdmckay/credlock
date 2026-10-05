@@ -294,20 +294,13 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, from asker) pro
 	if len(missing) > 0 && req.NoPrompt {
 		return proto.Response{NotHeld: true}
 	}
-	if from.pairing != "" {
-		// An unpaired caller always sees the window, even for what its
-		// origin may still hold from a key it no longer has.
-		values, missing = map[string]string{}, req.Secrets
-	}
 	asked := false
 	if len(missing) > 0 {
 		// One dialog at a time. Look again once it is our turn: the request
 		// ahead of us may have been approved for the same secrets.
 		s.asking.Lock()
 		defer s.asking.Unlock()
-		if from.pairing == "" {
-			values, missing = s.lookup(req, origin)
-		}
+		values, missing = s.lookup(req, origin)
 	}
 	if len(missing) > 0 {
 		asked = true
@@ -317,8 +310,6 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, from asker) pro
 			Cwd:       req.Cwd,
 			Requester: from.requester,
 			Origin:    from.host,
-			Pairing:   from.pairing,
-			Code:      from.code,
 			Account:   firstNonEmpty(req.AccountLabel, req.Account),
 			Secrets:   missing,
 			Approved:  len(uniqueRefs(req.Secrets)) - len(uniqueRefs(missing)),
@@ -336,11 +327,6 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, from asker) pro
 		}
 		if !ok {
 			return proto.Response{Denied: true}
-		}
-		if from.pair != nil {
-			if err := from.pair(); err != nil {
-				return proto.Response{Error: "pairing: " + err.Error()}
-			}
 		}
 		refs := uniqueRefs(missing)
 		// Approved: finish the fetch even if the asker has gone, so the
@@ -374,12 +360,14 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, from asker) pro
 
 // asker is who a request comes from.
 type asker struct {
-	origin    string       // whose approvals: "" for this Mac, or "user@host"
-	requester string       // how the window names them
-	host      string       // another machine's Tailscale name; empty for this Mac
-	pairing   string       // "new" for a caller to pair; the window says so
-	code      string       // the pairing code the caller's terminal shows
-	pair      func() error // on Allow, to remember the pairing
+	origin    string // whose approvals: "" for this Mac, or "user@host"
+	requester string // how the window names them
+	host      string // another machine's Tailscale name; empty for this Mac
+	// For a caller to pair first, in a pairing window of its own: the code
+	// its terminal shows, and how to remember it once paired.
+	pairing string
+	code    string
+	pair    func() error
 }
 
 // logUse records a delivery in the access log, and the names it used. The

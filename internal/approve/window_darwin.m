@@ -165,11 +165,15 @@ static NSStackView *hstack(NSArray<NSView *> *views, CGFloat spacing, NSLayoutAt
 }
 
 // card is a tinted, rounded panel around content.
-static NSView *card(NSColor *tint, NSView *content) {
+static NSView *cardWidth(NSColor *tint, NSView *content, CGFloat width);
+
+static NSView *card(NSColor *tint, NSView *content) { return cardWidth(tint, content, kInner); }
+
+static NSView *cardWidth(NSColor *tint, NSView *content, CGFloat width) {
   CLTile *t = tile([tint colorWithAlphaComponent:0.07], [tint colorWithAlphaComponent:0.28], 14);
   [t addSubview:content];
   pin(content, t, kCardPad);
-  fixWidth(t, kInner);
+  fixWidth(t, width);
   return t;
 }
 
@@ -217,6 +221,8 @@ static NSView *secret(NSString *name, NSString *ref, CGFloat width) {
 @property BOOL pressed;
 @property BOOL hovering;
 @property(copy) NSString *title;
+@property(strong) NSColor *tint;            // a primary button's colour; green if unset
+@property(strong) NSTextField *titleField;  // for a countdown in the title
 @end
 
 @implementation CLButton
@@ -237,7 +243,8 @@ static NSView *secret(NSString *name, NSString *ref, CGFloat width) {
   ]];
   NSColor *fg = primary ? NSColor.whiteColor : NSColor.labelColor;
   NSColor *dim = primary ? [NSColor.whiteColor colorWithAlphaComponent:0.8] : NSColor.secondaryLabelColor;
-  NSMutableArray *words = [NSMutableArray arrayWithObject:line(title, sys(15, NSFontWeightSemibold), fg)];
+  self.titleField = line(title, sys(15, NSFontWeightSemibold), fg);
+  NSMutableArray *words = [NSMutableArray arrayWithObject:self.titleField];
   if (hint.length) {
     [words addObject:line(hint, sys(11.5, NSFontWeightMedium), dim)];
   }
@@ -257,9 +264,14 @@ static NSView *secret(NSString *name, NSString *ref, CGFloat width) {
   self.alphaValue = armed ? 1 : 0.4;
 }
 
+- (void)setTitleText:(NSString *)title {
+  self.titleField.stringValue = title;
+}
+
 - (void)drawRect:(NSRect)dirty {
-  NSColor *green = [NSColor.systemGreenColor blendedColorWithFraction:0.12 ofColor:NSColor.blackColor];
-  NSColor *base = self.primary ? (green ?: NSColor.systemGreenColor) : raised();
+  NSColor *tint = self.tint ?: NSColor.systemGreenColor;
+  NSColor *deep = [tint blendedColorWithFraction:0.12 ofColor:NSColor.blackColor];
+  NSColor *base = self.primary ? (deep ?: tint) : raised();
   NSColor *shade = self.primary ? NSColor.blackColor : NSColor.labelColor;
   CGFloat f = self.pressed ? 0.18 : (self.hovering && self.armed ? 0.07 : 0);
   self.fill = f > 0 ? ([base blendedColorWithFraction:f ofColor:shade] ?: base) : base;
@@ -393,6 +405,8 @@ static NSDictionary *parse(const char *json) {
   id v = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
   return [v isKindOfClass:[NSDictionary class]] ? v : nil;
 }
+
+static CLPanel *makePanel(NSView *root);
 
 static CLWindow *build(NSDictionary *v, int timeout) {
   CLWindow *w = [CLWindow new];
@@ -557,7 +571,12 @@ static CLWindow *build(NSDictionary *v, int timeout) {
   [root setCustomSpacing:16 afterView:buttons];
   root.edgeInsets = NSEdgeInsetsMake(kMargin + 4, kMargin, kMargin - 6, kMargin);
   fixWidth(root, kWidth);
+  w.panel = makePanel(root);
+  return w;
+}
 
+// makePanel puts a laid-out root in a borderless-looking panel of its size.
+static CLPanel *makePanel(NSView *root) {
   CLTile *background = tile(NSColor.windowBackgroundColor, nil, 0);
   [background addSubview:root];
   pin(root, background, 0);
@@ -576,8 +595,83 @@ static CLWindow *build(NSDictionary *v, int timeout) {
     [[panel standardWindowButton:b] setHidden:YES];
   }
   panel.contentView = background;
-  w.panel = panel;
+  return panel;
+}
+
+static const CGFloat kPairWidth = 540;
+static const CGFloat kPairInner = kPairWidth - 2 * kMargin;
+
+// buildPairing is the pairing window: unlike an approval in look and in its
+// buttons, so it isn't answered by habit. The code is its centrepiece, and
+// there are no secrets in it: those are asked about separately, after.
+static CLWindow *buildPairing(NSDictionary *v, int timeout) {
+  CLWindow *w = [CLWindow new];
+  NSColor *purple = NSColor.systemPurpleColor;
+  NSView *header = hstack(@[
+    symbol(@"link", 26, purple),
+    vstack(@[
+      line(str(v, @"title"), sys(20, NSFontWeightBold), NSColor.labelColor),
+      line(str(v, @"subtitle"), sys(12, NSFontWeightMedium), NSColor.secondaryLabelColor),
+    ],
+           2),
+  ],
+                          14, NSLayoutAttributeCenterY);
+
+  CGFloat inner = kPairInner - 2 * kCardPad;
+  NSString *code = str(v, @"code");
+  NSMutableArray *digits = [NSMutableArray array];
+  for (NSUInteger i = 0; i < code.length; i++) {
+    [digits addObject:[code substringWithRange:NSMakeRange(i, 1)]];
+  }
+  NSTextField *note = text(str(v, @"origin_note"), sys(13, NSFontWeightRegular), NSColor.labelColor, inner);
+  note.alignment = NSTextAlignmentCenter;
+  NSTextField *big = line([digits componentsJoinedByString:@" "], mono(52, NSFontWeightBold), purple);
+  NSTextField *check = text(str(v, @"code_note"), sys(12.5, NSFontWeightSemibold), purple, inner);
+  check.alignment = NSTextAlignmentCenter;
+  NSStackView *hero = vstack(@[ note, big, check ], 10);
+  hero.alignment = NSLayoutAttributeCenterX;
+  NSView *codeCard = cardWidth(purple, hero, kPairInner);
+
+  NSFont *plain = mono(12, NSFontWeightRegular);
+  NSView *details = vstack(@[
+    detail(@"cpu", @"Requested by", str(v, @"requester"), plain, kPairInner),
+    detail(@"terminal", @"Command", str(v, @"command"), plain, kPairInner),
+    detail(@"folder", @"Directory", str(v, @"directory"), plain, kPairInner),
+  ],
+                           14);
+
+  CGFloat buttonWidth = (kPairInner - 16) / 2;
+  w.deny = [[CLButton alloc] initWithTitle:@"Don't pair" hint:@"Esc" symbol:@"xmark" primary:NO width:buttonWidth];
+  w.deny.exposed = YES;
+  w.allow = [[CLButton alloc] initWithTitle:@"Pair" hint:@"Click" symbol:@"link" primary:YES width:buttonWidth];
+  w.allow.tint = purple;
+  NSView *buttons = hstack(@[ w.deny, w.allow ], 16, NSLayoutAttributeCenterY);
+
+  w.countdown = line(remaining(timeout), [NSFont monospacedDigitSystemFontOfSize:11.5 weight:NSFontWeightRegular],
+                     NSColor.secondaryLabelColor);
+  NSStackView *footer = hstack(@[
+    symbol(@"lock.fill", 11, NSColor.tertiaryLabelColor),
+    text(str(v, @"footer"), sys(11.5, NSFontWeightRegular), NSColor.secondaryLabelColor, kPairInner - 170),
+  ],
+                               8, NSLayoutAttributeCenterY);
+  [footer addView:w.countdown inGravity:NSStackViewGravityTrailing];
+  fixWidth(footer, kPairInner);
+
+  NSStackView *root = vstack(@[ header, codeCard, details, buttons, footer ], kSection);
+  [root setCustomSpacing:28 afterView:details];
+  [root setCustomSpacing:16 afterView:buttons];
+  root.edgeInsets = NSEdgeInsetsMake(kMargin + 4, kMargin, kMargin - 6, kMargin);
+  fixWidth(root, kPairWidth);
+  w.panel = makePanel(root);
   return w;
+}
+
+static BOOL isPairing(NSDictionary *v) {
+  return [str(v, @"kind") isEqualToString:@"pair"];
+}
+
+static CLWindow *buildFor(NSDictionary *v, int timeout) {
+  return isPairing(v) ? buildPairing(v, timeout) : build(v, timeout);
 }
 
 static int timeoutOf(NSDictionary *v) {
@@ -596,7 +690,7 @@ int credlock_window_run(const char *json) {
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 
     __block int left = timeoutOf(v);
-    CLWindow *w = build(v, left);
+    CLWindow *w = buildFor(v, left);
     void (^finish)(NSModalResponse) = ^(NSModalResponse answer) {
       [NSApp stopModalWithCode:answer];
       // stopModal takes effect when the next event arrives, and a timer
@@ -622,13 +716,28 @@ int credlock_window_run(const char *json) {
       finish(kDeny);
     };
 
-    // Allow wakes after a second; the countdown ends in a denial.
+    // Allow wakes after a second, Pair after three, counting down on the
+    // button, so the code is seen first. The countdown ends in a denial.
+    BOOL pairing = isPairing(v);
+    int arm = pairing ? 3 : 1;
+    __block int elapsed = 0;
     w.allow.armed = NO;
+    if (pairing) {
+      [w.allow setTitleText:[NSString stringWithFormat:@"Pair (%d)", arm]];
+    }
     NSTimer *timer = [NSTimer timerWithTimeInterval:1
                                             repeats:YES
                                               block:^(NSTimer *t) {
                                                 left--;
-                                                w.allow.armed = YES;
+                                                elapsed++;
+                                                if (elapsed >= arm) {
+                                                  w.allow.armed = YES;
+                                                  if (pairing) {
+                                                    [w.allow setTitleText:@"Pair"];
+                                                  }
+                                                } else if (pairing) {
+                                                  [w.allow setTitleText:[NSString stringWithFormat:@"Pair (%d)", arm - elapsed]];
+                                                }
                                                 w.countdown.stringValue = remaining(left > 0 ? left : 0);
                                                 if (left <= 0) {
                                                   [t invalidate];
@@ -668,7 +777,7 @@ int credlock_window_snapshot(const char *json, const char *path, int dark) {
       return -1;
     }
     [NSApplication sharedApplication];
-    CLWindow *w = build(v, timeoutOf(v));
+    CLWindow *w = buildFor(v, timeoutOf(v));
     NSAppearance *look = [NSAppearance appearanceNamed:dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
     w.panel.appearance = look;
     NSView *view = w.panel.contentView;
