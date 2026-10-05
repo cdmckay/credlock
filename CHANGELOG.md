@@ -7,6 +7,14 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Security
+
+- Hub mode lets other machines ask a Mac for secrets. With `credlock hub on`,
+  users on machines in the Mac's tailnet who have paired with it can ask, and
+  each new secret still needs your Allow in the Mac's window. What you
+  approve is kept for that user on that machine alone. Hub mode is off
+  unless you turn it on.
+
 ### Added
 
 - Machines without 1Password, such as Linux servers on your Tailscale
@@ -17,9 +25,10 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 - Pairing: `credlock pair MAC` on the other machine pairs its user with the
   Mac, in a window that shows a code its terminal shows too. Each user there
   gets a key of their own, made on first use, and signs every request with
-  it. A key that doesn't match is refused and raises an alert in the menu
-  bar; five denied pairings from one machine pause its pairing requests for
-  an hour. `credlock hub status` lists the paired machines, and
+  it; the Mac signs every connection with its own, which the machine
+  remembers when it pairs. A key that doesn't match is refused and raises an
+  alert in the menu bar; five denied pairings from one machine pause its
+  pairing requests for an hour. `credlock hub status` lists the paired machines, and
   `credlock hub forget HOST` unpairs one.
 - A menu bar alert: the key turns red, and its menu says what happened, until
   dismissed.

@@ -2,12 +2,14 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/cdmckay/credlock/internal/proto"
 )
@@ -76,12 +78,25 @@ func installLoginItem() error {
 		return err
 	}
 	domain := fmt.Sprintf("gui/%d", os.Getuid())
-	_ = exec.Command("launchctl", "bootout", domain, path).Run()
+	// Loaded already, at login or by an earlier credlock hub on: the helper
+	// running may be launchd's, and reloading the job would kill it, and
+	// every approval it holds. launchd reads the file just written at the
+	// next login.
+	if launchctl("print", domain+"/"+loginItem) == nil {
+		return nil
+	}
 	// The helper already running holds the lock, so the one launchd starts
 	// now exits at once, successfully, and isn't restarted. At the next login
 	// launchd's is the one.
-	if out, err := exec.Command("launchctl", "bootstrap", domain, path).CombinedOutput(); err != nil {
-		return fmt.Errorf("launchctl bootstrap: %v: %s", err, strings.TrimSpace(string(out)))
+	return launchctl("bootstrap", domain, path)
+}
+
+// launchctl runs it, with a time limit.
+func launchctl(args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "launchctl", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("launchctl %s: %v: %s", args[0], err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -94,7 +109,10 @@ func removeLoginItem() error {
 	if err != nil {
 		return err
 	}
-	_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", os.Getuid()), path).Run()
+	// Only the file goes. Unloading the job would kill the helper if launchd
+	// started it, and every approval with it; with hub mode off it idles out
+	// as usual, and without the file launchd doesn't start it at the next
+	// login.
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}

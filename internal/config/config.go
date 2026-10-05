@@ -28,7 +28,7 @@ type Config struct {
 // Client is for a machine without 1Password, which asks hubs for secrets.
 type Client struct {
 	// Hubs are the tailnet hosts to ask, e.g. "potato", or "potato:7177", in
-	// place of the hubs this machine has paired with or finds on the tailnet.
+	// place of the hubs this machine has paired with (credlock pair).
 	// All are asked at once.
 	Hubs []string `toml:"hubs"`
 }

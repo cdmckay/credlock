@@ -143,9 +143,12 @@ func LoadHub() (Hub, error) {
 func (h Hub) Save() error { return write("hub.json", h) }
 
 // Client is what a machine without 1Password remembers: the hubs it has
-// paired with, which it then asks instead of searching the tailnet.
+// paired with, which it then asks, and each one's own key.
 type Client struct {
 	Hubs []string `json:"hubs,omitempty"`
+	// Keys are the paired hubs' keys, by hub name in lower case. A hub that
+	// answers with another key isn't the credlock this machine paired with.
+	Keys map[string]string `json:"keys,omitempty"`
 }
 
 // LoadClient reads the paired hubs.
@@ -158,11 +161,17 @@ func LoadClient() (Client, error) {
 // Save writes the paired hubs.
 func (c Client) Save() error { return write("client.json", c) }
 
-// Remember adds hub to the paired hubs, if it isn't there yet.
-func (c *Client) Remember(hub string) bool {
+// Remember adds hub, with its key, to the paired hubs, and says whether
+// anything changed.
+func (c *Client) Remember(hub, key string) bool {
+	changed := c.Keys[strings.ToLower(hub)] != key
+	if c.Keys == nil {
+		c.Keys = map[string]string{}
+	}
+	c.Keys[strings.ToLower(hub)] = key
 	for _, h := range c.Hubs {
 		if strings.EqualFold(h, hub) {
-			return false
+			return changed
 		}
 	}
 	c.Hubs = append(c.Hubs, hub)
@@ -173,7 +182,8 @@ const keyPrefix = "ed25519:"
 
 // Key is this user's credlock key on this machine, made on first use and
 // readable only by them. A hub pairs with it, so another user on the same
-// machine, without it, can't ask in their name.
+// machine, without it, can't ask in their name; and a hub proves itself with
+// its own, so another user on the hub's Mac can't answer in its place.
 func Key() (ed25519.PrivateKey, error) {
 	dir, err := Dir()
 	if err != nil {
@@ -224,9 +234,39 @@ func ParsePublicKey(s string) (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(b), nil
 }
 
-// PairingCode is the four digits a hub's window and the remote's terminal both
-// show for one pairing, from the hub's challenge and the remote's key.
-func PairingCode(challenge []byte, publicKey string) string {
-	sum := sha256.Sum256(append(append([]byte{}, challenge...), publicKey...))
+// The handshake between another machine and a hub. The machine speaks first,
+// with a nonce. The hub answers with its key, a challenge, and its signature
+// over both (HubProof), which the machine checks before it says anything
+// about what it wants. The machine then signs the challenge, its nonce and
+// the hub's key (ClientProof) with its own key, and sends its request. Each
+// side has signed something fresh from the other, under a label of its own,
+// so neither signature can be replayed, or passed off as the other kind.
+const NonceSize = 32
+
+// HubProof is what a hub signs: the machine's nonce and its own challenge.
+func HubProof(nonce, challenge []byte) []byte {
+	return handshake("credlock hub proof v1", nonce, challenge)
+}
+
+// ClientProof is what the other machine signs: the hub's challenge, its own
+// nonce, and the key the hub proved itself with.
+func ClientProof(challenge, nonce []byte, hubKey string) []byte {
+	return handshake("credlock client proof v1", challenge, nonce, []byte(hubKey))
+}
+
+func handshake(label string, parts ...[]byte) []byte {
+	msg := []byte(label)
+	for _, p := range parts {
+		msg = binary.BigEndian.AppendUint32(append(msg, 0), uint32(len(p)))
+		msg = append(msg, p...)
+	}
+	return msg
+}
+
+// PairingCode is the four digits a hub's window and the other machine's
+// terminal both show for one pairing. It covers the handshake and both keys,
+// so the codes only match when each side saw the other's real key.
+func PairingCode(challenge, nonce []byte, clientKey, hubKey string) string {
+	sum := sha256.Sum256(handshake("credlock pairing code v1", challenge, nonce, []byte(clientKey), []byte(hubKey)))
 	return fmt.Sprintf("%04d", binary.BigEndian.Uint32(sum[:4])%10000)
 }

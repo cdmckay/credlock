@@ -51,10 +51,9 @@ func snapshots(dir string) error {
 	}
 	remote := sample
 	remote.Origin = "papaya"
-	remote.Requester = "papaya, over Tailscale"
+	remote.Requester, remote.User = "alice (as papaya reports it)", "alice"
 	remote.Cwd = "/srv/invoiceninja"
 	pairing := remote
-	pairing.Requester = "me on papaya, over Tailscale"
 	pairing.Pairing, pairing.Code = "new", "4821"
 	pairing.Secrets, pairing.Approved = nil, 0
 	pairing.Command = []string{"credlock", "pair", "potato"}

@@ -324,16 +324,13 @@ func viaHubs(cfg config.Config, req proto.Request) (proto.Response, error) {
 		return proto.Response{}, errors.New("this machine has no 1Password, and no Mac to ask for secrets. " +
 			"Pair it with a Mac on the tailnet, once: credlock pair MAC (the Mac needs credlock hub on)")
 	}
-	auth := hubAuth{key: key, user: currentUser(), paired: map[string]bool{},
+	auth := hubAuth{key: key, user: currentUser(), pinned: remembered.Keys,
 		say: func(s string) { fmt.Fprintln(os.Stderr, s) }}
-	for _, h := range remembered.Hubs {
-		auth.paired[strings.ToLower(h)] = true
-	}
-	resp, winner, err := askHubs(hubs, req, auth)
-	if err == nil && len(resp.Values) > 0 && remembered.Remember(winner) {
+	got, err := askHubs(hubs, req, auth)
+	if err == nil && len(got.resp.Values) > 0 && remembered.Remember(got.hub, got.key) {
 		_ = remembered.Save()
 	}
-	return resp, err
+	return got.resp, err
 }
 
 // Pair is `credlock pair MAC`, on a machine without 1Password: it pairs this
@@ -355,10 +352,12 @@ func Pair(args []string) int {
 	host, _ := os.Hostname()
 	host, _, _ = strings.Cut(host, ".")
 	cwd, _ := os.Getwd()
-	auth := hubAuth{key: key, user: currentUser(), paired: map[string]bool{},
+	// No pinned keys: pairing on purpose trusts the hub that answers, and its
+	// window has to show the same code.
+	auth := hubAuth{key: key, user: currentUser(),
 		say: func(s string) { fmt.Fprintln(os.Stderr, s) }}
 	fmt.Fprintf(os.Stderr, "credlock: asking %s to pair; answer in its approval window.\n", hub)
-	resp, err := callHub(context.Background(), hub, proto.Request{
+	resp, hubKey, err := callHub(context.Background(), hub, proto.Request{
 		Op:      proto.OpPair,
 		Reason:  fmt.Sprintf("pair %s on %s with %s", auth.user, host, hub),
 		Command: []string{"credlock", "pair", hub},
@@ -380,7 +379,10 @@ func Pair(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	if remembered.Remember(hub) {
+	if old := remembered.Keys[strings.ToLower(hub)]; old != "" && old != hubKey {
+		fmt.Fprintf(os.Stderr, "credlock: %s has a different key from when it last paired, as it would after credlock was reinstalled there.\n", hub)
+	}
+	if remembered.Remember(hub, hubKey) {
 		if err := remembered.Save(); err != nil {
 			return fail(err)
 		}

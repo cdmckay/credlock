@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,11 +18,15 @@ import (
 	"github.com/cdmckay/credlock/internal/state"
 )
 
-// hubAuth is how this user on this machine proves who they are to hubs.
+// hubAuth is how this user on this machine proves who they are to hubs, and
+// knows the hubs it paired with.
 type hubAuth struct {
-	key    ed25519.PrivateKey
-	user   string
-	paired map[string]bool // hubs this machine has paired with
+	key  ed25519.PrivateKey
+	user string
+	// pinned is the key each paired hub proved itself with, by hub name in
+	// lower case. A hub not in it is trusted on first use, as SSH trusts a
+	// new host.
+	pinned map[string]string
 	// say shows a pairing code to the person, on stderr.
 	say func(string)
 }
@@ -43,8 +48,8 @@ const (
 // hub that can't be reached, or whose window times out, doesn't count; the
 // request fails only if no hub says yes.
 //
-// It returns the hub that answered.
-func askHubs(hubs []string, req proto.Request, auth hubAuth) (proto.Response, string, error) {
+// It returns the hub that answered, with the key it proved itself with.
+func askHubs(hubs []string, req proto.Request, auth hubAuth) (hubResult, error) {
 	check := req
 	check.NoPrompt = true
 	var reachable []string
@@ -58,11 +63,11 @@ func askHubs(hubs []string, req proto.Request, auth hubAuth) (proto.Response, st
 		case res.resp.NotHeld:
 			reachable = append(reachable, res.hub)
 		default:
-			return res.resp, res.hub, nil // that hub already holds them all
+			return res, nil // that hub already holds them all
 		}
 	}
 	if len(reachable) == 0 {
-		return proto.Response{}, "", &unreachable{failures, offline}
+		return hubResult{}, &unreachable{failures, offline}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -77,13 +82,13 @@ func askHubs(hubs []string, req proto.Request, auth hubAuth) (proto.Response, st
 		case res.resp.TimedOut:
 			timedOut = true
 		case res.resp.Denied, len(res.resp.Values) > 0:
-			return res.resp, res.hub, nil
+			return res, nil
 		}
 	}
 	if timedOut {
-		return proto.Response{Denied: true, TimedOut: true}, "", nil
+		return hubResult{resp: proto.Response{Denied: true, TimedOut: true}}, nil
 	}
-	return proto.Response{}, "", errors.New(strings.Join(failures, "; "))
+	return hubResult{}, errors.New(strings.Join(failures, "; "))
 }
 
 // unreachable is no hub taking the request: offline, or refusing it.
@@ -102,6 +107,7 @@ func (e *unreachable) Error() string {
 
 type hubResult struct {
 	hub  string
+	key  string // the key the hub proved itself with
 	resp proto.Response
 	err  error
 }
@@ -113,8 +119,8 @@ func fanOut(ctx context.Context, hubs []string, req proto.Request, wait time.Dur
 	done := make(chan struct{}, len(hubs))
 	for _, hub := range hubs {
 		go func() {
-			resp, err := callHub(ctx, hub, req, wait, auth)
-			out <- hubResult{hub: hub, resp: resp, err: err}
+			resp, key, err := callHub(ctx, hub, req, wait, auth)
+			out <- hubResult{hub: hub, key: key, resp: resp, err: err}
 			done <- struct{}{}
 		}()
 	}
@@ -127,40 +133,68 @@ func fanOut(ctx context.Context, hubs []string, req proto.Request, wait time.Dur
 	return out
 }
 
-// callHub sends one request to one hub over the tailnet and reads its answer.
-// The hub speaks first, with a challenge, which the request answers by
-// signing it with this machine user's key. Cancelling ctx closes the
-// connection, which the hub takes as a hang-up.
-func callHub(ctx context.Context, hub string, req proto.Request, wait time.Duration, auth hubAuth) (proto.Response, error) {
+// callHub sends one request to one hub over the tailnet and reads its answer,
+// with the key the hub proved itself with. This machine speaks first, with a
+// nonce, and the hub signs it: so before saying anything about what it wants,
+// this machine knows it reached a credlock hub, and the one it paired with if
+// it has (see state.HubProof). The request then signs the hub's challenge
+// with this machine user's key. Cancelling ctx closes the connection, which
+// the hub takes as a hang-up.
+func callHub(ctx context.Context, hub string, req proto.Request, wait time.Duration, auth hubAuth) (proto.Response, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	conn, err := (&net.Dialer{Timeout: hubDial}).DialContext(ctx, "tcp", config.Addr(hub))
 	if err != nil {
-		return proto.Response{}, err
+		return proto.Response{}, "", err
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	defer func() { _ = conn.Close() }()
-	r := bufio.NewReader(conn)
-	first, err := readResponse(ctx, r)
-	if err != nil {
-		return first, err
+	nonce := make([]byte, state.NonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		return proto.Response{}, "", err
 	}
-	challenge, err := base64.StdEncoding.DecodeString(first.Challenge)
-	if err != nil || len(challenge) == 0 {
-		return proto.Response{}, errors.New("it isn't a credlock hub: it sent no challenge")
+	if err := json.NewEncoder(conn).Encode(proto.Request{Nonce: base64.StdEncoding.EncodeToString(nonce)}); err != nil {
+		return proto.Response{}, "", err
+	}
+	r := bufio.NewReader(conn)
+	hello, err := readResponse(ctx, r)
+	if err != nil {
+		return hello, "", err
+	}
+	challenge, err := verifyHub(hub, hello, nonce, auth)
+	if err != nil {
+		return proto.Response{Error: err.Error()}, "", err
 	}
 	req.Key = state.PublicKey(auth.key)
 	req.User = auth.user
-	req.Proof = base64.StdEncoding.EncodeToString(ed25519.Sign(auth.key, challenge))
-	if !req.NoPrompt && !auth.paired[strings.ToLower(hub)] && auth.say != nil {
-		code := state.PairingCode(challenge, req.Key)
+	req.Proof = base64.StdEncoding.EncodeToString(ed25519.Sign(auth.key, state.ClientProof(challenge, nonce, hello.HubKey)))
+	if !req.NoPrompt && auth.pinned[strings.ToLower(hub)] == "" && auth.say != nil {
+		code := state.PairingCode(challenge, nonce, req.Key, hello.HubKey)
 		auth.say(fmt.Sprintf("credlock: if %s asks to pair with this machine, its window shows this code:\n\n      %s\n", hub, strings.Join(strings.Split(code, ""), " ")))
 	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return proto.Response{}, err
+		return proto.Response{}, "", err
 	}
-	return readResponse(ctx, r)
+	resp, err := readResponse(ctx, r)
+	return resp, hello.HubKey, err
+}
+
+// verifyHub checks the hub's answer to this machine's nonce: signed with the
+// key it sent, and that key the one this machine paired with, if it has. It
+// returns the hub's challenge.
+func verifyHub(hub string, hello proto.Response, nonce []byte, auth hubAuth) ([]byte, error) {
+	challenge, err := base64.StdEncoding.DecodeString(hello.Challenge)
+	pub, kerr := state.ParsePublicKey(hello.HubKey)
+	proof, perr := base64.StdEncoding.DecodeString(hello.HubProof)
+	if err != nil || len(challenge) == 0 || kerr != nil || perr != nil || !ed25519.Verify(pub, state.HubProof(nonce, challenge), proof) {
+		return nil, fmt.Errorf("refused: what answered at %s couldn't prove it is a credlock hub", hub)
+	}
+	if pinned := auth.pinned[strings.ToLower(hub)]; pinned != "" && pinned != hello.HubKey {
+		return nil, fmt.Errorf("refused: %s answered with a key it didn't pair with, so it may not be credlock on that Mac. "+
+			"If credlock was reinstalled there, pair again: credlock pair %s", hub, hub)
+	}
+	return challenge, nil
 }
 
 func readResponse(ctx context.Context, r *bufio.Reader) (proto.Response, error) {

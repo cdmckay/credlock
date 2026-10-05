@@ -6,6 +6,7 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,6 +80,9 @@ type Server struct {
 	// SaveHub stores hub mode: state.Hub.Save, unless a test keeps it in
 	// memory.
 	SaveHub func(state.Hub) error
+	// LoadKey gives the key the hub proves itself with: this Mac user's
+	// credlock key (state.Key), unless a test makes one.
+	LoadKey func() (ed25519.PrivateKey, error)
 
 	// hub is hub mode: whether this Mac answers other machines on its tailnet,
 	// and who is paired. A hub stays up instead of idling out.
@@ -94,6 +98,8 @@ type Server struct {
 	suffix, self string
 	// known is the account list, once Accounts has given one.
 	known []client.Account
+	// key is LoadKey's key, once a machine has asked.
+	key ed25519.PrivateKey
 	// alerts are what the person should look at, newest first; the menu bar
 	// key turns red until they are dismissed.
 	alerts []menubar.Alert
@@ -125,6 +131,7 @@ func NewServer(p provider.Provider, a approve.Approver) *Server {
 		Accounts: func() []client.Account { return client.AccountsWithin(5 * time.Second) },
 		Tailnet:  tailscaleStatus,
 		SaveHub:  state.Hub.Save,
+		LoadKey:  state.Key,
 		hubWake:  make(chan struct{}, 1),
 	}
 	s.Identify = s.identify
@@ -310,6 +317,7 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, from asker) pro
 			Cwd:       req.Cwd,
 			Requester: from.requester,
 			Origin:    from.host,
+			User:      from.user,
 			Account:   firstNonEmpty(req.AccountLabel, req.Account),
 			Secrets:   missing,
 			Approved:  len(uniqueRefs(req.Secrets)) - len(uniqueRefs(missing)),
@@ -363,11 +371,10 @@ type asker struct {
 	origin    string // whose approvals: "" for this Mac, or "user@host"
 	requester string // how the window names them
 	host      string // another machine's Tailscale name; empty for this Mac
-	// For a caller to pair first, in a pairing window of its own: the code
-	// its terminal shows, and how to remember it once paired.
-	pairing string
-	code    string
-	pair    func() error
+	user, key string // the user another machine reports, and the key it proved
+	// code is set while the caller still has to pair, in a pairing window of
+	// its own: the four digits its terminal shows.
+	code string
 }
 
 // logUse records a delivery in the access log, and the names it used. The

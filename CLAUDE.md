@@ -14,15 +14,17 @@ weighed against every feature, not a polish item for later.
 - **Using it on one Mac needs nothing** beyond installing it and turning on
   1Password's SDK integration. No config file, no setup command.
 - **Anything credlock can work out or do itself, it does.** It finds what it
-  can find (accounts, hubs on the tailnet), creates what it needs (keys, state
-  files, folders, with the right permissions) and remembers what it learns
-  (paired machines). It never asks the user to copy a key, edit a file, or
+  can find (accounts), creates what it needs (keys, state files, folders,
+  with the right permissions) and remembers what it learns (paired machines,
+  and each hub's key). It never asks the user to copy a key, edit a file, or
   run a setup step it could run itself.
 - **Turning a feature on is one switch** at most, such as a menu item or a
   single command. That's preferable to a config section.
-- **Security decisions still reach the person**, but as part of what they're
-  already doing. Pairing a new machine, for example, happens inside the first
-  approval window, with no separate step.
+- **Security decisions still reach the person**, in as few steps as they can
+  take. Pairing a machine, for example, is one command there naming the Mac
+  (it can't be found for you: a machine is told which Mac to trust) and one
+  window on the Mac with the same code. The keys are made, exchanged and
+  remembered without the person handling them.
 - **Config files are overrides,** for people who want to pin something down.
   A feature that only works once a file is written is unfinished.
 
@@ -78,9 +80,9 @@ with the cost of each way around it.
 
 ### Least exposure
 
-- Serve the minimum: the tailnet listener only resolves, and only on the
-  Mac's Tailscale addresses, never the local network. Status, clear and stop
-  are local only.
+- Serve the minimum: the tailnet listener only pairs and resolves, and only
+  on the Mac's Tailscale addresses, never the local network. Status, clear
+  and stop are local only.
 - Tightening is never a breaking change. Loosening anything (what needs
   approval, who may ask, how long an approval lasts) gets its own changelog
   line under Security.
@@ -134,6 +136,12 @@ with the cost of each way around it.
 - **A Tailscale device name means nothing on another tailnet.** Pin anything
   name-based to the tailnet it was set up on, and check the caller's full
   MagicDNS name.
+- **Tailscale proves which machine, not which process.** Any user on a Mac
+  can listen on an unprivileged port there while credlock isn't, so each side
+  proves itself with its own key before the other says anything that matters.
+- **`launchctl bootout` kills a loaded job's running process,** and after a
+  login the running helper is launchd's. Reloading the login item would drop
+  every approval, so credlock only writes or removes the file.
 
 ## Working on it
 

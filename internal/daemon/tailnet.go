@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/cdmckay/credlock/internal/approve"
@@ -34,6 +35,7 @@ import (
 // listeners, never the local network.
 func (s *Server) serveTailnet(ticks <-chan time.Time) {
 	listening := map[string]net.Listener{}
+	failed := map[string]string{} // the last error listening at each address
 	reported := ""
 	for {
 		s.mu.Lock()
@@ -64,11 +66,16 @@ func (s *Server) serveTailnet(ticks <-chan time.Time) {
 			if listening[ip] != nil {
 				continue
 			}
-			ln, err := net.Listen("tcp", net.JoinHostPort(ip, strconv.Itoa(config.DefaultPort)))
+			addr := net.JoinHostPort(ip, strconv.Itoa(config.DefaultPort))
+			ln, err := net.Listen("tcp", addr)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "credlock hub:", err)
+				if failed[ip] != err.Error() {
+					failed[ip] = err.Error()
+					s.listenFailed(addr, err)
+				}
 				continue
 			}
+			delete(failed, ip)
 			listening[ip] = ln
 			go s.serveRemote(ln)
 		}
@@ -98,6 +105,18 @@ func (s *Server) serveTailnet(ticks <-chan time.Time) {
 	}
 }
 
+// listenFailed reports a listener that couldn't start. A port that something
+// else holds gets an alert: other machines can't reach the hub, and whatever
+// holds it may be waiting for their requests. They refuse its answers, since
+// it can't prove it is this hub.
+func (s *Server) listenFailed(addr string, err error) {
+	if !errors.Is(err, syscall.EADDRINUSE) {
+		fmt.Fprintln(os.Stderr, "credlock hub:", err)
+		return
+	}
+	s.alert(fmt.Sprintf("Something else on this Mac holds %s, so other machines can't reach this hub there. It may be another user's credlock hub, or a program waiting for their requests.", addr))
+}
+
 func (s *Server) wakeHub() {
 	select {
 	case s.hubWake <- struct{}{}:
@@ -119,13 +138,16 @@ func (s *Server) serveRemote(ln net.Listener) {
 }
 
 // handleRemote answers another machine on the tailnet. Tailscale says which
-// machine it is. The machine then proves it holds the key it sends, by signing
-// a challenge: a key paired with this hub is that user on that machine. An
-// unpaired one is a first pairing, which the approval window shows and Allow
+// machine it is. The machine speaks first, with a nonce, and the hub signs it
+// with its own key, which the machine remembers when it pairs: so nothing
+// else on this Mac that gets hold of the port can answer in the hub's place.
+// The machine then proves it holds the key it sends, by signing the hub's
+// challenge. A key paired with this hub is that user on that machine. An
+// unpaired one is a first pairing, which the pairing window shows and Pair
 // completes. A key that differs from the paired one is refused outright, with
 // no window to accept it in: the person unpairs the machine on the hub, and
-// it pairs again as new. Only resolving is served, and everything approved is kept
-// for that user on that machine alone.
+// it pairs again as new. Only pairing and resolving are served, and
+// everything approved is kept for that user on that machine alone.
 func (s *Server) handleRemote(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	host, err := s.Identify(conn.RemoteAddr())
@@ -143,21 +165,34 @@ func (s *Server) handleRemote(conn net.Conn) {
 		reply(conn, proto.Response{Error: "refused: this is the hub's own machine; ask through its local socket instead (credlock run does)"})
 		return
 	}
+	r := bufio.NewReader(io.LimitReader(conn, maxRequest))
+	var hello proto.Request
+	if !readRemote(conn, r, &hello) {
+		return
+	}
+	nonce, err := base64.StdEncoding.DecodeString(hello.Nonce)
+	if err != nil || len(nonce) != state.NonceSize {
+		reply(conn, proto.Response{Error: "refused: a request from another machine starts with a nonce for the hub to sign. Is credlock there older than this hub's?"})
+		return
+	}
+	hubKey, err := s.hubKey()
+	if err != nil {
+		reply(conn, proto.Response{Error: "the hub's own key: " + err.Error()})
+		return
+	}
+	hubPub := state.PublicKey(hubKey)
 	challenge := make([]byte, 32)
 	if _, err := rand.Read(challenge); err != nil {
 		return
 	}
-	reply(conn, proto.Response{Challenge: base64.StdEncoding.EncodeToString(challenge)})
+	reply(conn, proto.Response{
+		Challenge: base64.StdEncoding.EncodeToString(challenge),
+		HubKey:    hubPub,
+		HubProof:  base64.StdEncoding.EncodeToString(ed25519.Sign(hubKey, state.HubProof(nonce, challenge))),
+	})
 
-	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	line, err := bufio.NewReader(io.LimitReader(conn, maxRequest)).ReadBytes('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return
-	}
-	_ = conn.SetReadDeadline(time.Time{})
 	var req proto.Request
-	if err := json.Unmarshal(line, &req); err != nil {
-		reply(conn, proto.Response{Error: "bad request: " + err.Error()})
+	if !readRemote(conn, r, &req) {
 		return
 	}
 	if req.Op != proto.OpResolve && req.Op != proto.OpPair {
@@ -166,7 +201,7 @@ func (s *Server) handleRemote(conn net.Conn) {
 	}
 	pub, err := state.ParsePublicKey(req.Key)
 	proof, perr := base64.StdEncoding.DecodeString(req.Proof)
-	if err != nil || perr != nil || !ed25519.Verify(pub, challenge, proof) {
+	if err != nil || perr != nil || !ed25519.Verify(pub, state.ClientProof(challenge, nonce, hubPub), proof) {
 		reply(conn, proto.Response{Error: "refused: the request isn't signed with the key it sent"})
 		return
 	}
@@ -174,47 +209,34 @@ func (s *Server) handleRemote(conn net.Conn) {
 	if user == "" {
 		user = "someone"
 	}
-	id := state.PeerID(user, host)
-
 	from := asker{
-		origin:    id,
-		requester: fmt.Sprintf("%s on %s, over Tailscale", user, host),
+		origin:    state.PeerID(user, host),
+		requester: fmt.Sprintf("%s (as %s reports it)", user, host),
 		host:      host,
+		user:      user,
+		key:       req.Key,
 	}
-	s.mu.Lock()
-	peer, known := s.hub.Peers[id]
-	s.mu.Unlock()
+	paired, refused := s.peerStatus(from)
 	switch {
-	case known && peer.Key != req.Key:
-		// A reinstall has no key at all, so a different one is no accident:
-		// refuse it, and tell the person. The pairing stays, so an attacker
-		// doesn't get a fresh pairing window by trying.
-		s.alert(fmt.Sprintf("%s on %s asked with a key it didn't pair with, possibly an attack. It was refused.", user, host))
-		reply(conn, proto.Response{Error: fmt.Sprintf("refused: %s on %s paired with this hub using a different key. "+
-			"If credlock was reinstalled there, unpair it on the hub (credlock hub forget %s), then pair again (credlock pair %s)", user, host, host, s.selfName())})
+	case refused != nil:
+		reply(conn, *refused)
 		return
-	case known && req.Op == proto.OpPair:
+	case paired && req.Op == proto.OpPair:
 		reply(conn, proto.Response{Paired: true})
 		return
-	case !known:
-		if until, cooling := s.coolingDown(host); cooling {
-			reply(conn, proto.Response{Error: fmt.Sprintf("refused: too many pairing requests from %s were denied; try again after %s", host, until.Local().Format("15:04"))})
+	case !paired:
+		if refused, cooling := s.coolingDown(host); cooling {
+			reply(conn, refused)
 			return
 		}
-		from.pairing = "new"
-		from.code = state.PairingCode(challenge, req.Key)
-		from.pair = func() error {
-			return s.pairPeer(state.Peer{Host: host, User: user, Key: req.Key, PairedAt: s.Now()})
-		}
+		from.code = state.PairingCode(challenge, nonce, req.Key, hubPub)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go watchHangup(conn, cancel)
 	if req.Op == proto.OpPair {
-		resp := s.pairOnly(ctx, req, from)
-		s.countPairing(host, resp)
-		reply(conn, resp)
+		reply(conn, s.pairOnly(ctx, req, from))
 		return
 	}
 
@@ -225,36 +247,95 @@ func (s *Server) handleRemote(conn net.Conn) {
 		return
 	}
 	req.Account, req.AccountLabel = accountID, label
-	if from.pairing != "" {
+	if from.code != "" {
 		if req.NoPrompt {
 			reply(conn, proto.Response{NotHeld: true}) // a check never opens a window
 			return
 		}
 		// One window, one job: pair first, in the pairing window, and only
 		// then ask about the secrets, in the usual one.
-		resp := s.pairOnly(ctx, req, from)
-		s.countPairing(host, resp)
-		if !resp.Paired {
+		if resp := s.pairOnly(ctx, req, from); !resp.Paired {
 			reply(conn, resp)
 			return
 		}
-		from.pairing, from.code, from.pair = "", "", nil
+		from.code = ""
 	}
 	reply(conn, s.resolve(ctx, req, from))
 }
 
+// readRemote reads one line from another machine into v, which has 30
+// seconds to send it.
+func readRemote(conn net.Conn, r *bufio.Reader, v any) bool {
+	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
+	line, err := r.ReadBytes('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false
+	}
+	if err := json.Unmarshal(line, v); err != nil {
+		reply(conn, proto.Response{Error: "bad request: " + err.Error()})
+		return false
+	}
+	return true
+}
+
+// hubKey is the key the hub proves itself with, loaded once a machine asks.
+func (s *Server) hubKey() (ed25519.PrivateKey, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.key == nil {
+		key, err := s.LoadKey()
+		if err != nil {
+			return nil, err
+		}
+		s.key = key
+	}
+	return s.key, nil
+}
+
+// peerStatus says whether from's key is the one paired for its user and
+// machine. A different key is refused, and the person told: a reinstall has
+// no key at all, so a different one is no accident. The pairing stays, so an
+// attacker doesn't get a fresh pairing window by trying.
+func (s *Server) peerStatus(from asker) (paired bool, refused *proto.Response) {
+	s.mu.Lock()
+	peer, known := s.hub.Peers[from.origin]
+	s.mu.Unlock()
+	switch {
+	case !known:
+		return false, nil
+	case peer.Key == from.key:
+		return true, nil
+	}
+	s.alert(fmt.Sprintf("%s on %s asked with a key it didn't pair with, possibly an attack. It was refused.", from.user, from.host))
+	return false, &proto.Response{Error: fmt.Sprintf("refused: %s on %s paired with this hub using a different key. "+
+		"If credlock was reinstalled there, unpair it on the hub (credlock hub forget %s), then pair again (credlock pair %s)", from.user, from.host, from.host, s.selfName())}
+}
+
 // pairOnly asks the person whether to pair a machine user, with no secrets
-// involved: `credlock pair` on the other machine.
-func (s *Server) pairOnly(ctx context.Context, req proto.Request, from asker) proto.Response {
+// involved. It looks again once it is its turn: a request ahead of it may
+// have paired the same user and machine, or used up the machine's denials.
+// How it ends is counted before the next request's turn.
+func (s *Server) pairOnly(ctx context.Context, req proto.Request, from asker) (resp proto.Response) {
 	s.asking.Lock()
 	defer s.asking.Unlock()
+	if paired, refused := s.peerStatus(from); refused != nil {
+		return *refused
+	} else if paired {
+		return proto.Response{Paired: true}
+	}
+	if refused, cooling := s.coolingDown(from.host); cooling {
+		return refused
+	}
+	defer func() { s.countPairing(from.host, resp) }() // runs before the unlock
 	ok, err := s.Approver.Approve(ctx, approve.Request{
 		Reason:    req.Reason,
 		Command:   req.Command,
 		Cwd:       req.Cwd,
 		Requester: from.requester,
 		Origin:    from.host,
-		Pairing:   from.pairing,
+		User:      from.user,
+		Pairing:   "new",
 		Code:      from.code,
 		Window:    Window,
 		Cap:       Cap,
@@ -269,7 +350,7 @@ func (s *Server) pairOnly(ctx context.Context, req proto.Request, from asker) pr
 	case !ok:
 		return proto.Response{Denied: true}
 	}
-	if err := from.pair(); err != nil {
+	if err := s.pairPeer(state.Peer{Host: from.host, User: from.user, Key: from.key, PairedAt: s.Now()}); err != nil {
 		return proto.Response{Error: "pairing: " + err.Error()}
 	}
 	s.mu.Lock()
@@ -325,13 +406,14 @@ func (s *Server) countPairing(host string, resp proto.Response) {
 	}
 }
 
-func (s *Server) coolingDown(host string) (time.Time, bool) {
+// coolingDown is the refusal for a machine whose pairing requests are paused.
+func (s *Server) coolingDown(host string) (proto.Response, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if d := s.denials[host]; d != nil && s.Now().Before(d.until) {
-		return d.until, true
+		return proto.Response{Error: fmt.Sprintf("refused: too many pairing requests from %s were denied; try again after %s", host, d.until.Local().Format("15:04"))}, true
 	}
-	return time.Time{}, false
+	return proto.Response{}, false
 }
 
 // alert tells the person something they should look at: the menu bar key
@@ -356,9 +438,22 @@ func (s *Server) selfName() string {
 	return "THIS-MAC"
 }
 
-// pairPeer remembers a machine user, once the person has allowed it.
+// pairPeer remembers a machine user, once the person has allowed it. It never
+// replaces a key paired already: that takes credlock hub forget first.
 func (s *Server) pairPeer(p state.Peer) error {
-	return s.updateHub(func(h *state.Hub) { h.Peers[state.PeerID(p.User, p.Host)] = p })
+	id := state.PeerID(p.User, p.Host)
+	clash := false
+	err := s.updateHub(func(h *state.Hub) {
+		if old, ok := h.Peers[id]; ok && old.Key != p.Key {
+			clash = true
+			return
+		}
+		h.Peers[id] = p
+	})
+	if clash {
+		return fmt.Errorf("%s is paired with a different key", id)
+	}
+	return err
 }
 
 // forgetOrigin drops every approval held for one origin.
@@ -488,6 +583,10 @@ var tailscaleCLI = sync.OnceValue(func() string {
 	return ""
 })
 
+// tailscaleTimeout is how long the tailscale command gets to answer: the
+// listener and every request from another machine wait for it.
+const tailscaleTimeout = 5 * time.Second
+
 // tailnetState is what Tailscale says about this machine now.
 type tailnetState struct {
 	Tailnet string   // e.g. "example.org"
@@ -501,7 +600,9 @@ func tailscaleStatus() (tailnetState, error) {
 	if cli == "" {
 		return tailnetState{}, errors.New("the tailscale command isn't installed, so the hub can't listen on the tailnet")
 	}
-	out, err := exec.Command(cli, "status", "--json").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), tailscaleTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, cli, "status", "--json").Output()
 	if err != nil {
 		return tailnetState{}, fmt.Errorf("tailscale status: %w (is Tailscale running?)", err)
 	}
@@ -576,7 +677,9 @@ func whois(addr net.Addr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out, err := exec.Command(cli, "whois", "--json", host).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), tailscaleTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, cli, "whois", "--json", host).Output()
 	if err != nil {
 		return "", fmt.Errorf("tailscale whois %s: %w", host, err)
 	}

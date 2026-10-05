@@ -4,11 +4,16 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -24,16 +29,19 @@ type remote struct {
 	t    *testing.T
 	h    *harness
 	addr string
+	key  ed25519.PrivateKey // the hub's own
 }
 
 func newRemote(t *testing.T, host string, allow bool, configure ...func(*Server)) *remote {
 	t.Helper()
+	hubKey := newKey(t)
 	hub := func(s *Server) {
 		s.Identify = func(net.Addr) (string, error) { return host, nil }
 		s.Accounts = func() []client.Account {
 			return []client.Account{{ID: "ACMEACCOUNTID", User: "ACMEUSER", Email: "me@acme.example", URL: "acme.1password.com"}}
 		}
 		s.SaveHub = func(state.Hub) error { return nil }
+		s.LoadKey = func() (ed25519.PrivateKey, error) { return hubKey, nil }
 		s.hub = state.Hub{Enabled: true, Tailnet: "example.org", Peers: map[string]state.Peer{}}
 		s.self = "potato"
 	}
@@ -44,7 +52,7 @@ func newRemote(t *testing.T, host string, allow bool, configure ...func(*Server)
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 	go h.server.serveRemote(ln)
-	return &remote{t: t, h: h, addr: ln.Addr().String()}
+	return &remote{t: t, h: h, addr: ln.Addr().String(), key: hubKey}
 }
 
 func newKey(t *testing.T) ed25519.PrivateKey {
@@ -56,43 +64,86 @@ func newKey(t *testing.T) ed25519.PrivateKey {
 	return priv
 }
 
-// ask sends req signed with key, as user, and returns the answer and the
-// pairing code a client would show for it.
-func (r *remote) ask(key ed25519.PrivateKey, user string, req proto.Request) (proto.Response, string) {
-	r.t.Helper()
-	conn, err := net.Dial("tcp", r.addr)
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	defer func() { _ = conn.Close() }()
-	rd := bufio.NewReader(conn)
-	first := read(r.t, rd)
-	if first.Error != "" {
-		return first, ""
-	}
-	challenge, err := base64.StdEncoding.DecodeString(first.Challenge)
-	if err != nil || len(challenge) == 0 {
-		r.t.Fatalf("no challenge: %+v", first)
-	}
-	req.Key, req.User = state.PublicKey(key), user
-	req.Proof = base64.StdEncoding.EncodeToString(ed25519.Sign(key, challenge))
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		r.t.Fatal(err)
-	}
-	return read(r.t, rd), state.PairingCode(challenge, req.Key)
+// session is one connection to the hub, once it has answered our nonce.
+type session struct {
+	conn  net.Conn
+	rd    *bufio.Reader
+	nonce []byte
+	hello proto.Response
 }
 
-func read(t *testing.T, r *bufio.Reader) proto.Response {
-	t.Helper()
-	line, err := r.ReadBytes('\n')
+// open connects and sends a nonce, as a client does, and checks that the hub
+// signed it with its key. A refusal comes back in hello.Error.
+func (r *remote) open() (*session, error) {
+	conn, err := net.Dial("tcp", r.addr)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
+	nonce := make([]byte, state.NonceSize)
+	_, _ = rand.Read(nonce)
+	s := &session{conn: conn, rd: bufio.NewReader(conn), nonce: nonce}
+	if err := json.NewEncoder(conn).Encode(proto.Request{Nonce: base64.StdEncoding.EncodeToString(nonce)}); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if s.hello, err = readAnswer(s.rd); err != nil || s.hello.Error != "" {
+		return s, err
+	}
+	challenge, _ := base64.StdEncoding.DecodeString(s.hello.Challenge)
+	proof, _ := base64.StdEncoding.DecodeString(s.hello.HubProof)
+	if s.hello.HubKey != state.PublicKey(r.key) || !ed25519.Verify(r.key.Public().(ed25519.PublicKey), state.HubProof(nonce, challenge), proof) {
+		_ = conn.Close()
+		return nil, fmt.Errorf("the hub didn't prove its key: %+v", s.hello)
+	}
+	return s, nil
+}
+
+// signed is req from user, signed with key for this connection.
+func (s *session) signed(key ed25519.PrivateKey, user string, req proto.Request) proto.Request {
+	challenge, _ := base64.StdEncoding.DecodeString(s.hello.Challenge)
+	req.Key, req.User = state.PublicKey(key), user
+	req.Proof = base64.StdEncoding.EncodeToString(ed25519.Sign(key, state.ClientProof(challenge, s.nonce, s.hello.HubKey)))
+	return req
+}
+
+// try sends req signed with key, as user, and returns the answer and the
+// pairing code a client would show for it. It fails nothing, so goroutines
+// can use it.
+func (r *remote) try(key ed25519.PrivateKey, user string, req proto.Request) (proto.Response, string, error) {
+	s, err := r.open()
+	if err != nil {
+		return proto.Response{}, "", err
+	}
+	defer func() { _ = s.conn.Close() }()
+	if s.hello.Error != "" {
+		return s.hello, "", nil
+	}
+	req = s.signed(key, user, req)
+	if err := json.NewEncoder(s.conn).Encode(req); err != nil {
+		return proto.Response{}, "", err
+	}
+	challenge, _ := base64.StdEncoding.DecodeString(s.hello.Challenge)
+	resp, err := readAnswer(s.rd)
+	return resp, state.PairingCode(challenge, s.nonce, req.Key, s.hello.HubKey), err
+}
+
+// ask is try, failing the test on any error.
+func (r *remote) ask(key ed25519.PrivateKey, user string, req proto.Request) (proto.Response, string) {
+	r.t.Helper()
+	resp, code, err := r.try(key, user, req)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return resp, code
+}
+
+func readAnswer(r *bufio.Reader) (proto.Response, error) {
 	var resp proto.Response
-	if err := json.Unmarshal(line, &resp); err != nil {
-		t.Fatal(err)
+	line, err := r.ReadBytes('\n')
+	if err == nil {
+		err = json.Unmarshal(line, &resp)
 	}
-	return resp
+	return resp, err
 }
 
 func resolveReq(account string, secrets ...proto.Secret) proto.Request {
@@ -128,7 +179,7 @@ func TestAFirstRequestPairsInItsWindowAndThenNeedsNone(t *testing.T) {
 	// approval, with no pairing in it.
 	shown := r.h.approver.dialogs()
 	if len(shown) != 2 || shown[0].Pairing != "new" || shown[0].Code != code || len(shown[0].Secrets) != 0 ||
-		shown[0].Origin != "papaya" || shown[0].Requester != "me on papaya, over Tailscale" {
+		shown[0].Origin != "papaya" || shown[0].User != "me" || shown[0].Requester != "me (as papaya reports it)" {
 		t.Fatalf("the pairing window showed %+v (code %s)", shown, code)
 	}
 	if shown[1].Pairing != "" || len(shown[1].Secrets) != 1 || shown[1].Account != "acme.1password.com (me@acme.example)" {
@@ -244,21 +295,49 @@ func TestTheHubsOwnMachineIsRefused(t *testing.T) {
 
 func TestAnUnsignedRequestIsRefused(t *testing.T) {
 	r := newRemote(t, "papaya", true)
+	s, err := r.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.conn.Close() }()
+	req := s.signed(newKey(t), "me", resolveReq("acme", sec("A", "op://v/a/f")))
+	req.Proof = base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
+	if err := json.NewEncoder(s.conn).Encode(req); err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := readAnswer(s.rd); err != nil || !strings.Contains(resp.Error, "isn't signed") || len(r.h.approver.dialogs()) != 0 {
+		t.Fatalf("got %+v, %v", resp, err)
+	}
+}
+
+func TestAProofForAnotherHubIsRefused(t *testing.T) {
+	r := newRemote(t, "papaya", true)
+	s, err := r.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.conn.Close() }()
+	s.hello.HubKey = state.PublicKey(newKey(t)) // as if signed for a hub with another key
+	if err := json.NewEncoder(s.conn).Encode(s.signed(newKey(t), "me", resolveReq("acme", sec("A", "op://v/a/f")))); err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := readAnswer(s.rd); err != nil || !strings.Contains(resp.Error, "isn't signed") {
+		t.Fatalf("got %+v, %v", resp, err)
+	}
+}
+
+func TestAMachineThatSendsNoNonceIsRefused(t *testing.T) {
+	r := newRemote(t, "papaya", true)
 	conn, err := net.Dial("tcp", r.addr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
-	rd := bufio.NewReader(conn)
-	read(t, rd) // the challenge
-	req := resolveReq("acme", sec("A", "op://v/a/f"))
-	req.Key, req.User = state.PublicKey(newKey(t)), "me"
-	req.Proof = base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
+	if err := json.NewEncoder(conn).Encode(resolveReq("acme", sec("A", "op://v/a/f"))); err != nil {
 		t.Fatal(err)
 	}
-	if resp := read(t, rd); !strings.Contains(resp.Error, "isn't signed") || len(r.h.approver.dialogs()) != 0 {
-		t.Fatalf("got %+v", resp)
+	if resp, err := readAnswer(bufio.NewReader(conn)); err != nil || !strings.Contains(resp.Error, "nonce") || resp.Challenge != "" {
+		t.Fatalf("got %+v, %v", resp, err)
 	}
 }
 
@@ -411,23 +490,109 @@ func (w *waitingApprover) wasClosed() bool {
 func TestHangingUpClosesTheWindow(t *testing.T) {
 	w := &waitingApprover{}
 	r := newRemote(t, "papaya", true, func(s *Server) { s.Approver = w })
-	key := newKey(t)
-	conn, err := net.Dial("tcp", r.addr)
+	s, err := r.open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	rd := bufio.NewReader(conn)
-	first := read(t, rd)
-	challenge, _ := base64.StdEncoding.DecodeString(first.Challenge)
-	req := resolveReq("acme", sec("A", "op://v/a/f"))
-	req.Key, req.User = state.PublicKey(key), "me"
-	req.Proof = base64.StdEncoding.EncodeToString(ed25519.Sign(key, challenge))
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
+	if err := json.NewEncoder(s.conn).Encode(s.signed(newKey(t), "me", resolveReq("acme", sec("A", "op://v/a/f")))); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(50 * time.Millisecond) // the window is open
-	_ = conn.Close()
+	_ = s.conn.Close()
 	if !eventually(w.wasClosed) {
 		t.Fatal("the window stayed open after the asker hung up")
+	}
+}
+
+// queue starts each request at once and lets the approver answer only after
+// all of them have had time to queue for their turn.
+func (r *remote) queue(hold chan struct{}, n int, ask func(i int) proto.Response) []proto.Response {
+	r.t.Helper()
+	out := make([]proto.Response, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out[i] = ask(i)
+		}()
+	}
+	time.Sleep(100 * time.Millisecond)
+	close(hold)
+	wg.Wait()
+	return out
+}
+
+func TestPairingRequestsQueuedTogetherStillStopAtFiveDenials(t *testing.T) {
+	hold := make(chan struct{})
+	r := newRemote(t, "papaya", false, func(s *Server) { s.Approver.(*fakeApprover).hold = hold })
+	const n = maxPairingDenials + 3
+	keys := make([]ed25519.PrivateKey, n)
+	for i := range keys {
+		keys[i] = newKey(t)
+	}
+	got := r.queue(hold, n, func(i int) proto.Response {
+		resp, _, err := r.try(keys[i], fmt.Sprintf("user%d", i), proto.Request{Op: proto.OpPair, Reason: "pair"})
+		if err != nil {
+			resp.Error = err.Error()
+		}
+		return resp
+	})
+	refused := 0
+	for _, resp := range got {
+		if strings.Contains(resp.Error, "too many pairing requests") {
+			refused++
+		}
+	}
+	if shown := len(r.h.approver.dialogs()); shown != maxPairingDenials || refused != n-maxPairingDenials {
+		t.Fatalf("%d windows and %d refusals for %d requests: %+v", shown, refused, n, got)
+	}
+}
+
+func TestAPairingQueuedBehindTheSameUsersIsRefused(t *testing.T) {
+	hold := make(chan struct{})
+	r := newRemote(t, "papaya", true, func(s *Server) { s.Approver.(*fakeApprover).hold = hold })
+	keys := []ed25519.PrivateKey{newKey(t), newKey(t)}
+	got := r.queue(hold, 2, func(i int) proto.Response {
+		resp, _, err := r.try(keys[i], "me", proto.Request{Op: proto.OpPair, Reason: "pair"})
+		if err != nil {
+			resp.Error = err.Error()
+		}
+		return resp
+	})
+	winner := 0
+	if !got[0].Paired {
+		winner = 1
+	}
+	// One window, for whichever came first; the other is a different key for
+	// a paired user, refused with no window at all.
+	if !got[winner].Paired || !strings.Contains(got[1-winner].Error, "different key") || len(r.h.approver.dialogs()) != 1 {
+		t.Fatalf("got %+v, %d windows", got, len(r.h.approver.dialogs()))
+	}
+	if r.peers()["me@papaya"].Key != state.PublicKey(keys[winner]) || len(r.alerts()) != 1 {
+		t.Fatalf("the pairing changed: %+v, alerts %q", r.peers(), r.alerts())
+	}
+}
+
+func TestPairingNeverReplacesAPairedKey(t *testing.T) {
+	r := newRemote(t, "papaya", true)
+	mine, theirs := state.PublicKey(newKey(t)), state.PublicKey(newKey(t))
+	if err := r.h.server.pairPeer(state.Peer{Host: "papaya", User: "me", Key: mine}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.h.server.pairPeer(state.Peer{Host: "papaya", User: "me", Key: theirs}); err == nil || r.peers()["me@papaya"].Key != mine {
+		t.Fatalf("replaced: %v, %+v", err, r.peers())
+	}
+}
+
+func TestAPortSomethingElseHoldsRaisesAnAlert(t *testing.T) {
+	r := newRemote(t, "papaya", true)
+	r.h.server.listenFailed("100.64.0.1:7177", &net.OpError{Op: "listen", Net: "tcp", Err: os.NewSyscallError("bind", syscall.EADDRINUSE)})
+	if a := r.alerts(); len(a) != 1 || !strings.Contains(a[0], "holds 100.64.0.1:7177") {
+		t.Fatalf("alerts %q", a)
+	}
+	r.h.server.listenFailed("100.64.0.1:7177", errors.New("some other failure"))
+	if a := r.alerts(); len(a) != 1 {
+		t.Fatalf("an ordinary failure raised an alert: %q", a)
 	}
 }

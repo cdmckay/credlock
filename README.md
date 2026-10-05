@@ -68,7 +68,7 @@ that holds an approval for it answers without a window.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/pairing-window-dark.png">
-  <img src="docs/images/pairing-window-light.png" width="540" alt="The pairing window: 'Pair me on papaya with this Mac?', with the four-digit code large in a purple card, who is asking, the command and directory, and Don't pair and Pair buttons.">
+  <img src="docs/images/pairing-window-light.png" width="540" alt="The pairing window: 'Pair a user on papaya with this Mac?', with the four-digit code large in a purple card, who is asking, the command and directory, and Don't pair and Pair buttons.">
 </picture>
 
 How it's kept safe:
@@ -76,11 +76,18 @@ How it's kept safe:
 - **Tailscale says which machine is asking**, and the hub only listens on
   the tailnet it was turned on in. A caller's full Tailscale name must be in
   that tailnet, so a device elsewhere can't pass for one of yours.
-- **A key says which user is asking.** credlock makes one for each user on
-  the other machine, readable only by them, in `~/.local/state/credlock`, and
-  every request signs a fresh challenge with it. Another user there can't
-  ask in your name; they'd get a pairing window naming them, with a code
-  only their own terminal shows.
+- **A key says which user is asking, once paired.** credlock makes one for
+  each user on the other machine, readable only by them, in
+  `~/.local/state/credlock`, and every request signs a fresh challenge with
+  it. The user name is only what that machine reports, and the window says
+  so. What ties a first pairing to you is its code: pair only if the window
+  shows the code your terminal printed. After that, another user there can't
+  ask in your name without your key.
+- **The Mac proves it's the Mac.** It signs every connection with a key of
+  its own, which the other machine remembers when it pairs and checks before
+  it says what it wants. Something else holding the Mac's port, such as
+  another user's program there, can't answer in its place, and the Mac's menu
+  bar raises an alert when something holds the port.
 - **A key that doesn't match is refused, and the Mac's menu bar key turns
   red** with an alert, since a reinstall has no key at all: something else
   is asking in that machine's name. Re-pair on purpose: `credlock hub forget
@@ -96,7 +103,7 @@ How it's kept safe:
   kernel says which user is asking.
 - **What it can't stop:** root on the other machine, or other programs
   running as you there, can use your key. New secrets still need your
-  click, and every use shows in the menu bar.
+  click, and every use shows in the menu bar. More under [Limits](#limits).
 
 ## Commands
 
@@ -160,9 +167,18 @@ mode 0700 and refuses to use if anyone else owns it.
   approved.
 - The command you approve can do anything with the secrets it receives, as with
   `op run`.
-- macOS only for now. The operating-system pieces sit behind
-  `internal/platform`. On Linux, approvals would use a plain zenity dialog
-  until credlock has a window there too.
+- **Other machines, in hub mode:** root on a paired machine, or another
+  program running as you there, can use your credlock key. Any device in the
+  tailnet can put up pairing windows, up to five denied ones an hour per
+  machine, and the user name in them is what that machine reports. A
+  machine's first contact with a Mac (`credlock pair`, or a first request
+  through `[client] hubs`) trusts the Mac that answers, as SSH trusts a new
+  host: pair only when the Mac's window shows your terminal's code. The Mac
+  has to be awake, on the tailnet, with hub mode on.
+- Approving needs a Mac for now; other systems, such as Linux servers, ask
+  one (above). The operating-system pieces sit behind `internal/platform`. On
+  Linux, approvals would use a plain zenity dialog until credlock has a
+  window there too.
 
 ## Releases
 
