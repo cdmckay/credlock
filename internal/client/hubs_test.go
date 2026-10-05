@@ -2,8 +2,10 @@ package client
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/ed25519"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net"
@@ -32,10 +34,11 @@ func testAuth(t *testing.T) hubAuth {
 }
 
 // fakeHub answers like a hub: "holds" has the secrets already; "allow",
-// "deny" and "timeout" are how its window ends; "pairing" says it is opening
-// its pairing window, then allows; "wait" never answers, and notices when the
-// asker hangs up; "plain" doesn't speak TLS, as something else holding the
-// hub's port might not.
+// "deny" and "timeout" are how its window ends; "pairing" reveals its part of
+// the pairing code as it opens its pairing window, then allows, and
+// "badreveal" reveals something other than what it committed to; "wait" never
+// answers, and notices when the asker hangs up; "plain" doesn't speak TLS, as
+// something else holding the hub's port might not.
 type fakeHub struct {
 	addr     string
 	key      ed25519.PrivateKey
@@ -88,7 +91,8 @@ func (h *fakeHub) serve(raw net.Conn, behaviour string, delay time.Duration) {
 	}
 	cs := conn.ConnectionState()
 	key, err := channel.PeerKey(cs)
-	code, _ := channel.PairingCode(cs)
+	nonce := bytes.Repeat([]byte{7}, channel.NonceSize) // a real hub's is fresh
+	answer(conn, proto.Response{Commit: base64.StdEncoding.EncodeToString(channel.Commit(nonce))})
 	r := bufio.NewReader(conn)
 	line, rerr := r.ReadBytes('\n')
 	if rerr != nil {
@@ -96,9 +100,15 @@ func (h *fakeHub) serve(raw net.Conn, behaviour string, delay time.Duration) {
 	}
 	var req proto.Request
 	_ = json.Unmarshal(line, &req)
+	theirs, _ := base64.StdEncoding.DecodeString(req.Nonce)
+	code, _ := channel.PairingCode(cs, nonce, theirs)
 	h.mu.Lock()
 	h.asked, h.code = true, code
 	h.mu.Unlock()
+	reveal := base64.StdEncoding.EncodeToString(nonce)
+	if behaviour == "badreveal" {
+		reveal = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{8}, channel.NonceSize))
+	}
 	if err != nil || key == "" || req.User != "me" {
 		answer(conn, proto.Response{Error: "refused: no key"})
 		return
@@ -127,8 +137,8 @@ func (h *fakeHub) serve(raw net.Conn, behaviour string, delay time.Duration) {
 	}
 	time.Sleep(delay)
 	switch behaviour {
-	case "pairing":
-		answer(conn, proto.Response{Pairing: true})
+	case "pairing", "badreveal":
+		answer(conn, proto.Response{Pairing: true, Reveal: reveal})
 		answer(conn, proto.Response{Values: values})
 	case "allow":
 		answer(conn, proto.Response{Values: values})
@@ -280,5 +290,16 @@ func TestAPairedHubIsAskedWithItsKeyChecked(t *testing.T) {
 	auth.pinned[strings.ToLower(hub.addr)] = state.PublicKey(hub.key)
 	if got, err := askHubs([]string{hub.addr}, request, auth); err != nil || got.key != state.PublicKey(hub.key) || len(got.resp.Values) != 1 {
 		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestAPairingCodeThatIsntTheOneCommittedToIsRefused(t *testing.T) {
+	hub := startHub(t, "badreveal", 0)
+	auth := testAuth(t)
+	var said []string
+	auth.say = func(s string) { said = append(said, s) }
+	got, err := askHubs([]string{hub.addr}, request, auth)
+	if err == nil || !strings.Contains(err.Error(), "isn't the one it committed to") || len(got.resp.Values) != 0 || len(said) != 0 {
+		t.Fatalf("got %+v, %v, said %q", got, err, said)
 	}
 }

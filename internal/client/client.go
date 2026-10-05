@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -362,7 +363,8 @@ func Pair(args []string) int {
 	}
 	if forget {
 		if !remembered.Forget(hub) {
-			return fail(fmt.Errorf("this machine isn't paired with %s", hub))
+			dir, _ := state.Dir()
+			return fail(fmt.Errorf("this machine isn't paired with %s, so there's nothing to forget. The Macs it has paired with are in %s", hub, filepath.Join(dir, "client.json")))
 		}
 		if err := remembered.Save(); err != nil {
 			return fail(err)

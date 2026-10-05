@@ -141,6 +141,10 @@ with the cost of each way around it.
   connection is TLS 1.3 with each side's key pinned: a signature that isn't
   tied to the connection can be relayed, and whatever relays it then reads
   or writes the answer.
+- **A short code needs a commitment.** Four digits from the TLS session alone
+  can be ground: something in the middle redials until both ends' codes
+  match. The hub commits to its part first and reveals it only with a
+  counted pairing window.
 - **`launchctl bootout` kills a loaded job's running process,** and after a
   login the running helper is launchd's. Reloading the login item would drop
   every approval, so credlock only writes or removes the file.

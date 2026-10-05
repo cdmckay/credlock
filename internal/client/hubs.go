@@ -2,8 +2,11 @@ package client
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -165,33 +168,56 @@ func callHub(ctx context.Context, hub string, req proto.Request, wait time.Durat
 	done()
 	switch {
 	case refused != nil:
-		return proto.Response{Error: refused.Error()}, "", refused
+		return refuse(refused.Error())
 	case err != nil && ctx.Err() != nil:
 		return proto.Response{}, "", ctx.Err()
 	case err != nil:
-		msg := fmt.Sprintf("refused: %s didn't complete credlock's handshake (%v). Check that it runs credlock hub on "+
-			"with a current credlock, and that nothing else there uses port %d", hub, err, config.DefaultPort)
-		return proto.Response{Error: msg}, "", errors.New(msg)
+		return refuse(fmt.Sprintf("refused: %s didn't complete credlock's handshake (%v). Check that it runs credlock hub on "+
+			"with a current credlock, and that nothing else there uses port %d", hub, err, config.DefaultPort))
 	}
 	cs := conn.ConnectionState()
 	hubKey, err := channel.PeerKey(cs)
 	if err != nil {
 		return proto.Response{}, "", err
 	}
-	req.User = auth.user
+	// The hub commits to its part of a pairing code first; only then does
+	// this machine send its own (see channel.PairingCode).
+	r := bufio.NewReader(conn)
+	first, err := readResponse(ctx, r)
+	if err != nil {
+		return first, hubKey, err
+	}
+	commit, err := base64.StdEncoding.DecodeString(first.Commit)
+	if err != nil || len(commit) == 0 {
+		return refuse(fmt.Sprintf("refused: %s didn't commit to a pairing code. Check that it runs a credlock as current as this one", hub))
+	}
+	ours := make([]byte, channel.NonceSize)
+	if _, err := rand.Read(ours); err != nil {
+		return proto.Response{}, "", err
+	}
+	req.User, req.Nonce = auth.user, base64.StdEncoding.EncodeToString(ours)
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return proto.Response{}, "", err
 	}
-	r := bufio.NewReader(conn)
 	for {
 		resp, err := readResponse(ctx, r)
 		if err != nil || !resp.Pairing {
 			return resp, hubKey, err
 		}
-		if code, err := channel.PairingCode(cs); err == nil && auth.say != nil {
+		theirs, err := base64.StdEncoding.DecodeString(resp.Reveal)
+		code, cerr := channel.PairingCode(cs, theirs, ours)
+		if err != nil || cerr != nil || !bytes.Equal(channel.Commit(theirs), commit) {
+			return refuse(fmt.Sprintf("refused: %s's pairing code isn't the one it committed to, so something may be in the middle. This machine hung up, which closes the window there; don't pair with it", hub))
+		}
+		if auth.say != nil {
 			auth.say(fmt.Sprintf("credlock: %s is asking whether to pair with this machine. Pair only if its window shows this code:\n\n      %s\n", hub, strings.Join(strings.Split(code, ""), " ")))
 		}
 	}
+}
+
+// refuse is a refusal from a hub: an answer, not a hub that can't be reached.
+func refuse(msg string) (proto.Response, string, error) {
+	return proto.Response{Error: msg}, "", errors.New(msg)
 }
 
 func readResponse(ctx context.Context, r *bufio.Reader) (proto.Response, error) {

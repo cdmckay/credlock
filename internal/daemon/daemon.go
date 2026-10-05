@@ -104,7 +104,8 @@ type Server struct {
 	// alerts are what the person should look at, newest first; the menu bar
 	// key turns red until they are dismissed.
 	alerts []menubar.Alert
-	// denials counts denied pairing requests by machine, for the cooldown.
+	// denials counts pairing windows that ended without Pair, by machine, for
+	// the cooldown.
 	denials map[string]*pairingDenials
 
 	mu       sync.Mutex // guards everything below

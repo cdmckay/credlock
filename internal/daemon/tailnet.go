@@ -3,7 +3,9 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -175,12 +177,24 @@ func (s *Server) handleRemote(raw net.Conn) {
 		reply(conn, proto.Response{Error: "refused: this is the hub's own machine; ask through its local socket instead (credlock run does)"})
 		return
 	}
+	// Fixed before the machine says anything: see channel.PairingCode. A
+	// fresh one every time, since it is revealed with each pairing window.
+	ours := make([]byte, channel.NonceSize)
+	if _, err := rand.Read(ours); err != nil {
+		return
+	}
+	reply(conn, proto.Response{Commit: base64.StdEncoding.EncodeToString(channel.Commit(ours))})
 	var req proto.Request
 	if !readRemote(conn, bufio.NewReader(io.LimitReader(conn, maxRequest)), &req) {
 		return
 	}
 	if req.Op != proto.OpResolve && req.Op != proto.OpPair {
 		reply(conn, proto.Response{Error: fmt.Sprintf("refused: a hub only pairs and resolves for other machines, not %q", req.Op)})
+		return
+	}
+	theirs, err := base64.StdEncoding.DecodeString(req.Nonce)
+	if err != nil || len(theirs) != channel.NonceSize {
+		reply(conn, proto.Response{Error: "refused: a request from another machine carries its part of the pairing code. Is credlock there older than this hub's?"})
 		return
 	}
 	cs := conn.ConnectionState()
@@ -213,11 +227,13 @@ func (s *Server) handleRemote(raw net.Conn) {
 			reply(conn, refused)
 			return
 		}
-		if from.code, err = channel.PairingCode(cs); err != nil {
+		if from.code, err = channel.PairingCode(cs, ours, theirs); err != nil {
 			reply(conn, proto.Response{Error: "the pairing code: " + err.Error()})
 			return
 		}
-		from.announce = func() { reply(conn, proto.Response{Pairing: true}) }
+		from.announce = func() {
+			reply(conn, proto.Response{Pairing: true, Reveal: base64.StdEncoding.EncodeToString(ours)})
+		}
 	}
 
 	ctx, cancel = context.WithCancel(context.Background())
@@ -308,8 +324,9 @@ func (s *Server) peerStatus(from asker) (paired bool, refused *proto.Response) {
 
 // pairOnly asks the person whether to pair a machine user, with no secrets
 // involved. It looks again once it is its turn: a request ahead of it may
-// have paired the same user and machine, or used up the machine's denials.
-// How it ends is counted before the next request's turn.
+// have paired the same user and machine, or used up the machine's pairing
+// windows. Each window counts from the moment the machine is told the code,
+// before the next request's turn.
 func (s *Server) pairOnly(ctx context.Context, req proto.Request, from asker) (resp proto.Response) {
 	s.asking.Lock()
 	defer s.asking.Unlock()
@@ -321,12 +338,9 @@ func (s *Server) pairOnly(ctx context.Context, req proto.Request, from asker) (r
 	if refused, cooling := s.coolingDown(from.host); cooling {
 		return refused
 	}
-	shown := false
-	defer func() { // before the unlock
-		if shown {
-			s.countPairing(from.host, resp.Paired)
-		}
-	}()
+	// Revealing the code is what costs a window, whatever the window then
+	// does: otherwise a device could learn codes without one counting.
+	defer func() { s.countPairing(from.host, resp.Paired) }() // before the unlock
 	if from.announce != nil {
 		from.announce()
 	}
@@ -342,7 +356,6 @@ func (s *Server) pairOnly(ctx context.Context, req proto.Request, from asker) (r
 		Window:    Window,
 		Cap:       Cap,
 	}) // no Secrets: the pairing window shows none, whatever the request wants
-	shown = err == nil || errors.Is(err, approve.ErrTimedOut) || ctx.Err() != nil
 	switch {
 	case errors.Is(err, approve.ErrTimedOut):
 		return proto.Response{Denied: true, TimedOut: true}
@@ -379,10 +392,11 @@ const (
 )
 
 // countPairing notes how a pairing window ended. Anything but Pair counts: a
-// Deny, a window nobody answered, an asker that hung up. The fifth refuses the
-// machine's pairing requests for an hour, so a device can't keep putting
-// windows up until one is allowed by habit, and an accidental Deny or two
-// costs nothing.
+// Deny, a window nobody answered, an asker that hung up, a window that failed
+// to open after its code was revealed. The fifth refuses the machine's
+// pairing requests for an hour, so a device can't keep putting windows up
+// until one is allowed by habit, or keep learning codes, and an accidental
+// Deny or two costs nothing.
 func (s *Server) countPairing(host string, paired bool) {
 	s.mu.Lock()
 	if s.denials == nil {

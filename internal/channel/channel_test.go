@@ -44,9 +44,14 @@ func finish(conn *tls.Conn) end {
 	if e.key, e.err = PeerKey(cs); e.err != nil {
 		return e
 	}
-	e.code, e.err = PairingCode(cs)
+	e.code, e.err = PairingCode(cs, hubNonce, machineNonce)
 	return e
 }
+
+var (
+	hubNonce     = bytes.Repeat([]byte("h"), NonceSize)
+	machineNonce = bytes.Repeat([]byte("m"), NonceSize)
+)
 
 // tcp is two ends of a loopback TCP connection. A net.Pipe won't do: it has
 // no buffer, so a TLS alert nobody reads blocks for ever.
@@ -229,5 +234,29 @@ func TestARelayCantReadTheConnection(t *testing.T) {
 	}
 	if atMachine.code != atHub.code {
 		t.Fatalf("relayed codes differ: %s and %s", atMachine.code, atHub.code)
+	}
+}
+
+func TestTheCodeDependsOnBothNonces(t *testing.T) {
+	machine, _ := newCert(t)
+	hub, _ := newCert(t)
+	c, s := connect(t,
+		func(conn net.Conn) *tls.Conn { return Client(conn, machine, trustAny) },
+		func(conn net.Conn) *tls.Conn { return Server(conn, hub) })
+	if c.err != nil || s.err != nil {
+		t.Fatal(c.err, s.err)
+	}
+	cs := c.conn.ConnectionState()
+	other := bytes.Repeat([]byte("x"), NonceSize)
+	a, _ := PairingCode(cs, other, machineNonce)
+	b, _ := PairingCode(cs, hubNonce, other)
+	if a == c.code && b == c.code {
+		t.Fatal("the code ignores the nonces")
+	}
+	if _, err := PairingCode(cs, hubNonce[:4], machineNonce); err == nil {
+		t.Fatal("a short nonce was taken")
+	}
+	if bytes.Equal(Commit(hubNonce), Commit(other)) || !bytes.Equal(Commit(hubNonce), Commit(hubNonce)) {
+		t.Fatal("Commit doesn't bind its nonce")
 	}
 }

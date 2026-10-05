@@ -4,12 +4,14 @@
 // learns the machine's key from its certificate, and the machine checks the
 // hub's against the key it remembered when it paired. TLS ties both keys to
 // the connection and encrypts it, so whatever relays it can neither read it
-// nor answer in it.
+// nor answer in it. A first pairing has no key to check, so the person
+// compares a code instead (PairingCode).
 package channel
 
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -84,12 +86,29 @@ func PeerKey(cs tls.ConnectionState) (string, error) {
 	return state.EncodeKey(pub), nil
 }
 
+// NonceSize is the size of the nonce each end adds to a pairing code.
+const NonceSize = 32
+
+// Commit is what the hub sends first, before it sees the machine's nonce: a
+// hash of its own, which it reveals only as it opens its pairing window.
+func Commit(hubNonce []byte) []byte {
+	sum := sha256.Sum256(hubNonce)
+	return sum[:]
+}
+
 // PairingCode is the four digits both ends show for one pairing. It comes
-// from the TLS session itself, so the two match only when both ends share
-// it: anything that sits in the middle, with a session to each, shows each a
-// different code.
-func PairingCode(cs tls.ConnectionState) (string, error) {
-	b, err := cs.ExportKeyingMaterial("credlock pairing code v1", nil, 4)
+// from the TLS session and from a nonce each end adds: the hub's, committed
+// to before it sees the machine's and revealed only as its pairing window
+// opens, and the machine's, sent only after that commitment. Anything in the
+// middle has a session with each end and can't choose its nonces to make the
+// two codes match: it matches by chance, 1 in 10,000, and each try is a
+// pairing window on the Mac.
+func PairingCode(cs tls.ConnectionState, hubNonce, machineNonce []byte) (string, error) {
+	if len(hubNonce) != NonceSize || len(machineNonce) != NonceSize {
+		return "", errors.New("a pairing nonce has the wrong size")
+	}
+	context := append(append([]byte{}, hubNonce...), machineNonce...)
+	b, err := cs.ExportKeyingMaterial("credlock pairing code v2", context, 4)
 	if err != nil {
 		return "", err
 	}

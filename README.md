@@ -62,8 +62,8 @@ that holds an approval for it answers without a window.
    `credlock hub off` stops it.
 2. **On the other machine:** `credlock pair potato`, naming the Mac. The Mac
    shows a pairing window with a four-digit code, the terminal shows the
-   same code, and Allow pairs them. From then on `credlock run` just works
-   there. (Or set `[client] hubs = ["potato"]` in `~/.config/credlock/config.toml`,
+   same code, and its Pair button pairs them. From then on `credlock run`
+   just works there. (Or set `[client] hubs = ["potato"]` in `~/.config/credlock/config.toml`,
    and the first request pairs in its own window.)
 
 <picture>
@@ -89,8 +89,11 @@ How it's kept safe:
   before it sends anything. Something else holding the Mac's port, such as
   another user's program there, can't read what a paired machine asks or
   answer in the Mac's place, and the Mac's menu bar raises an alert when
-  something holds the port. The pairing code comes from the TLS session, so
-  anything in the middle of a pairing shows the two ends different codes.
+  something holds the port. The pairing code comes from the TLS session and
+  from a number each end adds, the Mac committing to its own before it sees
+  the other's. Anything in the middle of a pairing can't steer the two codes
+  to match: it matches by chance, 1 in 10,000, and each try is a pairing
+  window on the Mac, which names the device asking.
 - **A key that doesn't match is refused, and the Mac's menu bar key turns
   red** with an alert. Either credlock was reinstalled on that machine, which
   makes a new key, or something else is asking in its name. After a
@@ -178,9 +181,12 @@ mode 0700 and refuses to use if anyone else owns it.
   program running as you there, can use your credlock key. Any device in the
   tailnet can put up pairing windows, five an hour per machine, and the user
   name in them is what that machine reports. The count starts again if the
-  helper restarts. A machine's first contact with a Mac (`credlock pair`, a
+  helper restarts. A four-digit code leaves something in the middle of a
+  pairing a 1 in 10,000 chance per window, so check the device the window
+  names too. A machine's first contact with a Mac (`credlock pair`, a
   first request through `[client] hubs`, or pairing again after `credlock
-  pair --forget`) trusts the Mac that answers, as SSH trusts a new host:
+  pair --forget`, or a Mac named differently in `[client] hubs` from how
+  it was paired) trusts the Mac that answers, as SSH trusts a new host:
   pair only when the Mac's window shows your terminal's code, and if no
   window appeared, don't trust it. The Mac has to be awake, on the tailnet,
   with hub mode on.

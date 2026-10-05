@@ -47,8 +47,10 @@ type Request struct {
 	NoPrompt bool `json:"no_prompt,omitempty"`
 
 	// User is the user another machine says is asking. Its key is the one in
-	// its TLS certificate (see internal/channel).
-	User string `json:"user,omitempty"`
+	// its TLS certificate, and Nonce its part of a pairing code (see
+	// internal/channel).
+	User  string `json:"user,omitempty"`
+	Nonce string `json:"nonce,omitempty"`
 
 	// For OpHub.
 	Hub  string `json:"hub,omitempty"`
@@ -90,9 +92,13 @@ type Response struct {
 	NotHeld bool    `json:"not_held,omitempty"`
 	Error   string  `json:"error,omitempty"`
 	Entries []Entry `json:"entries,omitempty"`
-	// Pairing comes before a hub's answer, when it opens its pairing window:
-	// the other machine shows the code the window shows.
-	Pairing bool `json:"pairing,omitempty"`
+	// Commit is a hub's first line to another machine: a hash of its part of
+	// a pairing code. Pairing comes before its answer, as it opens its
+	// pairing window, with Reveal, that part; the other machine checks it
+	// against Commit and shows the code the window shows.
+	Commit  string `json:"commit,omitempty"`
+	Pairing bool   `json:"pairing,omitempty"`
+	Reveal  string `json:"reveal,omitempty"`
 	// Paired answers OpPair: this machine user is paired with the hub.
 	Paired bool     `json:"paired,omitempty"`
 	Hub    *HubInfo `json:"hub,omitempty"`

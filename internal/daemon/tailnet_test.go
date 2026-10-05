@@ -2,9 +2,12 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,11 +67,13 @@ func newKey(t *testing.T) ed25519.PrivateKey {
 	return priv
 }
 
-// session is one connection to the hub, after the TLS handshake.
+// session is one connection to the hub, after the TLS handshake and the
+// hub's first line.
 type session struct {
-	conn *tls.Conn
-	rd   *bufio.Reader
-	code string // the pairing code both ends of this session show
+	conn  *tls.Conn
+	rd    *bufio.Reader
+	cs    tls.ConnectionState
+	first proto.Response // the hub's commitment to its part of a pairing code, or a refusal
 }
 
 // open connects as a machine with key does, and checks that the hub proved
@@ -92,45 +97,63 @@ func (r *remote) open(key ed25519.PrivateKey) (*session, error) {
 		_ = raw.Close()
 		return nil, err
 	}
-	code, err := channel.PairingCode(conn.ConnectionState())
-	if err != nil {
+	s := &session{conn: conn, rd: bufio.NewReader(conn), cs: conn.ConnectionState()}
+	if s.first, err = readAnswer(s.rd); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
-	return &session{conn: conn, rd: bufio.NewReader(conn), code: code}, nil
+	if s.first.Error == "" && s.first.Commit == "" {
+		_ = conn.Close()
+		return nil, fmt.Errorf("the hub didn't commit first: %+v", s.first)
+	}
+	return s, nil
 }
 
-// send sends req as user, and returns the answer and whether the hub said it
-// was opening its pairing window first.
-func (s *session) send(user string, req proto.Request) (proto.Response, bool, error) {
-	req.User = user
-	if err := json.NewEncoder(s.conn).Encode(req); err != nil {
-		return proto.Response{}, false, err
+// write sends req as user, with a fresh nonce, which it returns.
+func (s *session) write(user string, req proto.Request) ([]byte, error) {
+	nonce := make([]byte, channel.NonceSize)
+	_, _ = rand.Read(nonce)
+	req.User, req.Nonce = user, base64.StdEncoding.EncodeToString(nonce)
+	return nonce, json.NewEncoder(s.conn).Encode(req)
+}
+
+// send sends req as user, and returns the answer and the pairing code the
+// hub's pairing line gives, if it sent one, checked against its commitment.
+func (s *session) send(user string, req proto.Request) (proto.Response, string, error) {
+	nonce, err := s.write(user, req)
+	if err != nil {
+		return proto.Response{}, "", err
 	}
-	announced := false
+	code := ""
 	for {
 		resp, err := readAnswer(s.rd)
 		if err != nil || !resp.Pairing {
-			return resp, announced, err
+			return resp, code, err
 		}
-		announced = true
+		commit, _ := base64.StdEncoding.DecodeString(s.first.Commit)
+		reveal, _ := base64.StdEncoding.DecodeString(resp.Reveal)
+		if !bytes.Equal(channel.Commit(reveal), commit) {
+			return resp, "", errors.New("the hub's reveal doesn't match its commitment")
+		}
+		if code, err = channel.PairingCode(s.cs, reveal, nonce); err != nil {
+			return resp, "", err
+		}
 	}
 }
 
 // try sends req as user, from a machine with key, and returns the answer and
-// the pairing code its terminal would show: none unless the hub said it
-// opened its pairing window. It fails nothing, so goroutines can use it.
+// the pairing code its terminal would show: none unless the hub revealed one,
+// as it opened its pairing window. It fails nothing, so goroutines can use it.
 func (r *remote) try(key ed25519.PrivateKey, user string, req proto.Request) (proto.Response, string, error) {
 	s, err := r.open(key)
 	if err != nil {
 		return proto.Response{}, "", err
 	}
 	defer func() { _ = s.conn.Close() }()
-	resp, announced, err := s.send(user, req)
-	if !announced {
-		return resp, "", err
+	if s.first.Error != "" {
+		return s.first, "", nil
 	}
-	return resp, s.code, err
+	return s.send(user, req)
 }
 
 // ask is try, failing the test on any error.
@@ -415,7 +438,8 @@ func TestACheckOnlyRequestNeverOpensAWindow(t *testing.T) {
 	key, a := newKey(t), sec("A", "op://v/a/f")
 	check := resolveReq("acme", a)
 	check.NoPrompt = true
-	if resp, _ := r.ask(key, "me", check); !resp.NotHeld || len(r.h.approver.dialogs()) != 0 {
+	// Unpaired, but a check opens no window, so the hub reveals no code.
+	if resp, code := r.ask(key, "me", check); !resp.NotHeld || code != "" || len(r.h.approver.dialogs()) != 0 {
 		t.Fatalf("unpaired: %+v", resp)
 	}
 	r.ask(key, "me", resolveReq("acme", a))
@@ -490,9 +514,7 @@ func TestHangingUpClosesTheWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := resolveReq("acme", sec("A", "op://v/a/f"))
-	req.User = "me"
-	if err := json.NewEncoder(s.conn).Encode(req); err != nil {
+	if _, err := s.write("me", resolveReq("acme", sec("A", "op://v/a/f"))); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(50 * time.Millisecond) // the window is open
@@ -637,5 +659,44 @@ func TestTheTerminalShowsTheCodeOnceTheHubSaysItIsPairing(t *testing.T) {
 	resp, code = r.ask(key, "me", resolveReq("acme", sec("A", "op://v/a/f")))
 	if shown := r.h.approver.dialogs(); resp.Values == nil || code == "" || len(shown) != 3 || shown[1].Code != code {
 		t.Fatalf("after forget: %+v, code %q, windows %+v", resp, code, shown)
+	}
+}
+
+func TestARequestWithoutItsPartOfThePairingCodeIsRefused(t *testing.T) {
+	r := newRemote(t, "papaya", true)
+	s, err := r.open(newKey(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.conn.Close() }()
+	req := resolveReq("acme", sec("A", "op://v/a/f"))
+	req.User = "me"
+	if err := json.NewEncoder(s.conn).Encode(req); err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := readAnswer(s.rd); err != nil || !strings.Contains(resp.Error, "part of the pairing code") || len(r.h.approver.dialogs()) != 0 {
+		t.Fatalf("got %+v, %v", resp, err)
+	}
+}
+
+// failing is a window that never opens.
+type failing struct{}
+
+func (failing) Approve(context.Context, approve.Request) (bool, error) {
+	return false, errors.New("no window")
+}
+
+// Once the code is revealed it costs a window, whatever the window then
+// does, so a device can't learn codes for free.
+func TestAWindowThatFailsAfterItsCodeIsRevealedStillCounts(t *testing.T) {
+	r := newRemote(t, "papaya", true, func(s *Server) { s.Approver = failing{} })
+	pair := proto.Request{Op: proto.OpPair, Reason: "pair"}
+	for i := range maxPairingDenials {
+		if resp, code := r.ask(newKey(t), "me", pair); code == "" || !strings.Contains(resp.Error, "no window") {
+			t.Fatalf("window %d: %+v, code %q", i, resp, code)
+		}
+	}
+	if resp, code := r.ask(newKey(t), "me", pair); !strings.Contains(resp.Error, "too many pairing windows") || code != "" {
+		t.Fatalf("got %+v, code %q", resp, code)
 	}
 }
