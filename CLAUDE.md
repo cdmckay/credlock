@@ -53,6 +53,67 @@ with the cost of each way around it.
 - Approvals are kept per origin. One machine's approvals are never served to
   another.
 
+### Fail closed, and never hang
+
+- Anything that fails, crashes, times out or can't be verified counts as a
+  denial. An unknown caller, a missing signature or an unreadable answer is a
+  refusal, never a guess.
+- The helper must never block on something outside it. Every external call
+  has a time limit: a resolver gets three minutes, `op` five seconds, a hub
+  dial three. Notifying the menu bar never waits. A stuck part is killed and
+  replaced.
+- Anything that can crash or hang runs in its own child process (the window,
+  the menu bar icon, each account's resolver), so a failure there never costs
+  the helper what it holds.
+
+### Agents are users too
+
+- credlock is mostly called by coding agents. `credlock help` must be enough
+  for an agent that has never seen it, and every error says what to check
+  next, not just what failed.
+- Distinct outcomes get distinct exits: 77 for a denial, so an agent can stop
+  and ask a person rather than retry.
+- Text shown to people says plainly what is verified (by the kernel or
+  Tailscale) and what is the requester's claim.
+
+### Least exposure
+
+- Serve the minimum: the tailnet listener only resolves, and only on the
+  Mac's Tailscale addresses, never the local network. Status, clear and stop
+  are local only.
+- Tightening is never a breaking change. Loosening anything (what needs
+  approval, who may ask, how long an approval lasts) gets its own changelog
+  line under Security.
+- Every known limit is written down in the README's Limits section, with
+  known attack vectors named. Never let the docs claim more than credlock
+  does.
+
+### Few, well-known dependencies
+
+- The approval path uses what the OS provides (AppKit, Go's standard
+  library, including its crypto) before any library. A new dependency needs a
+  reason that beats writing the code, and it has to be widely used and
+  maintained.
+- CI pins every action to a commit SHA, since a moved tag would run someone
+  else's code against a secrets tool.
+
+### Build the thin slice, then prove it live
+
+- Ship a slice that works end to end, then fill it in. One account, one
+  machine, one window, working for real, beats layers built separately.
+- Tests can't click, and they can't see a real 1Password or Tailscale. Before
+  merging anything that touches the window, the menu bar, 1Password or the
+  tailnet, run it live, and say in the PR what was tested that way. Most of
+  the bugs fixed so far were only found live.
+- Check the actual artifact before assuming: read the SDK's source, Tailscale's
+  real `whois` output, Homebrew's own docs.
+
+### Leave the door open to Linux
+
+- Keep platform code behind small interfaces (`platform`, `approve.Approver`,
+  `menubar.Supported`), with a stub that says what's missing, so other systems
+  can be added without reworking the rest.
+
 ## Things learned the hard way
 
 - **The 1Password Go SDK reaches only one account per process** (#8). It
@@ -75,6 +136,11 @@ with the cost of each way around it.
   MagicDNS name.
 
 ## Working on it
+
+- Write like the code around you. Comments explain why, not what. Test names
+  read as the behaviour they check, such as
+  `TestADenyEndsTheRequestEverywhere`. Commit messages say why the change
+  was needed and how it was tested.
 
 - Build and test in the dev shell: `nix develop`. CI runs `gofmt`, `go vet`,
   `go test -race`, golangci-lint, govulncheck, `nix build` and a Linux build.
