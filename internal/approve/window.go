@@ -52,6 +52,10 @@ type View struct {
 	// OriginTone colours the card: "remote" for a paired machine, "pair" for
 	// a first pairing.
 	OriginTone string `json:"origin_tone,omitempty"`
+	// Code is a pairing's four digits, shown large in the card, with CodeNote
+	// under them.
+	Code     string `json:"code,omitempty"`
+	CodeNote string `json:"code_note,omitempty"`
 }
 
 // NewView lays out r for the window. Everything in it except Requester came
@@ -110,11 +114,15 @@ func NewView(r Request, timeout time.Duration) View {
 			v.Footer = fmt.Sprintf("Pairing sends no secrets. Each one %s asks for later still needs your Allow.", origin)
 			v.OriginTone = "pair"
 			v.OriginTitle = fmt.Sprintf("%s wants to pair with this Mac", who)
-			v.OriginNote = fmt.Sprintf("It hasn't asked this Mac before. Its terminal shows the code %s: if yours does too, Allow pairs it. Deny if you didn't just run something there.", code)
+			v.OriginNote = "It hasn't asked this Mac before. If its terminal shows the same code, Allow pairs it. Deny if you didn't just run something there."
 		case r.Pairing == "new":
 			v.OriginTone = "pair"
 			v.OriginTitle = fmt.Sprintf("%s wants to pair with this Mac", who)
-			v.OriginNote = fmt.Sprintf("It hasn't asked this Mac before. Its terminal shows the code %s: if yours does too, Allow pairs it and sends the values to %s. Deny if you didn't just run something there.", code, origin)
+			v.OriginNote = fmt.Sprintf("It hasn't asked this Mac before. If its terminal shows the same code, Allow pairs it and sends the values to %s. Deny if you didn't just run something there.", origin)
+		}
+		if r.Pairing == "new" {
+			v.Code = code
+			v.CodeNote = fmt.Sprintf("Check that %s's terminal shows this code", origin)
 		}
 	}
 	return v

@@ -154,7 +154,8 @@ func callHub(ctx context.Context, hub string, req proto.Request, wait time.Durat
 	req.User = auth.user
 	req.Proof = base64.StdEncoding.EncodeToString(ed25519.Sign(auth.key, challenge))
 	if !req.NoPrompt && !auth.paired[strings.ToLower(hub)] && auth.say != nil {
-		auth.say(fmt.Sprintf("credlock: if %s asks to pair with this machine, its window shows the code %s.", hub, state.PairingCode(challenge, req.Key)))
+		code := state.PairingCode(challenge, req.Key)
+		auth.say(fmt.Sprintf("credlock: if %s asks to pair with this machine, its window shows this code:\n\n      %s\n", hub, strings.Join(strings.Split(code, ""), " ")))
 	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return proto.Response{}, err

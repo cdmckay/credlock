@@ -69,8 +69,8 @@ func TestAPairingSaysSoAndShowsItsCode(t *testing.T) {
 	r := sample
 	r.Origin, r.Requester, r.Pairing, r.Code = "papaya", "me on papaya, over Tailscale", "new", "4821"
 	v := NewView(r, time.Minute)
-	if v.OriginTone != "pair" || v.OriginTitle != "me on papaya wants to pair with this Mac" ||
-		!strings.Contains(v.OriginNote, "code 4821") || !strings.Contains(v.OriginNote, "sends the values") {
+	if v.OriginTone != "pair" || v.OriginTitle != "me on papaya wants to pair with this Mac" || v.Code != "4821" ||
+		!strings.Contains(v.CodeNote, "papaya's terminal") || !strings.Contains(v.OriginNote, "sends the values") {
 		t.Fatalf("%+v", v)
 	}
 	r.Secrets, r.Approved = nil, 0

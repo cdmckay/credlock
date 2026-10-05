@@ -194,7 +194,7 @@ func TestAHubIsToldTheCodeOnlyWhenNotYetPaired(t *testing.T) {
 	if _, _, err := askHubs([]string{hub.addr}, request, auth); err != nil {
 		t.Fatal(err)
 	}
-	if len(said) != 1 || !strings.Contains(said[0], "its window shows the code") {
+	if len(said) != 1 || !strings.Contains(said[0], "its window shows this code") {
 		t.Fatalf("an unpaired hub: %q", said)
 	}
 	said = nil

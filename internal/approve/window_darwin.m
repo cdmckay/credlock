@@ -420,15 +420,33 @@ static CLWindow *build(NSDictionary *v, int timeout) {
     NSColor *colour = pairing ? NSColor.systemPurpleColor : NSColor.systemBlueColor;
     NSString *icon = pairing ? @"link" : @"network";
     CGFloat words = kCardInner - 42 - kIconGap;
-    origin = card(colour, hstack(@[
-                    badge(icon, 42, colour, YES),
-                    vstack(@[
-                      text(str(v, @"origin_title"), sys(15, NSFontWeightSemibold), NSColor.labelColor, words),
-                      text(str(v, @"origin_note"), sys(12, NSFontWeightRegular), NSColor.secondaryLabelColor, words),
-                    ],
-                           kLabelGap),
-                  ],
-                                                    kIconGap, NSLayoutAttributeCenterY));
+    NSView *about = hstack(@[
+      badge(icon, 42, colour, YES),
+      vstack(@[
+        text(str(v, @"origin_title"), sys(15, NSFontWeightSemibold), NSColor.labelColor, words),
+        text(str(v, @"origin_note"), sys(12, NSFontWeightRegular), NSColor.secondaryLabelColor, words),
+      ],
+             kLabelGap),
+    ],
+                           kIconGap, NSLayoutAttributeCenterY);
+    NSString *code = str(v, @"code");
+    if (code.length) {
+      // The pairing code, large enough that it can't be missed: "7 9 4 3".
+      NSMutableArray *digits = [NSMutableArray array];
+      for (NSUInteger i = 0; i < code.length; i++) {
+        [digits addObject:[code substringWithRange:NSMakeRange(i, 1)]];
+      }
+      NSView *indent = [[NSView alloc] initWithFrame:NSZeroRect];
+      fixWidth(indent, 42 + kIconGap - 8);
+      NSView *codeRow = hstack(@[
+        indent,
+        line([digits componentsJoinedByString:@" "], mono(34, NSFontWeightBold), colour),
+        text(str(v, @"code_note"), sys(12, NSFontWeightMedium), NSColor.secondaryLabelColor, words - 170),
+      ],
+                               18, NSLayoutAttributeCenterY);
+      about = vstack(@[ about, codeRow ], 12);
+    }
+    origin = card(colour, about);
   }
 
   // Why.
