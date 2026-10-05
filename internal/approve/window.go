@@ -43,6 +43,12 @@ type View struct {
 	Approved     string         `json:"approved,omitempty"`
 	Footer       string         `json:"footer"`
 	Timeout      int            `json:"timeout"` // seconds until it counts as Deny
+	// Origin is set for a request from another machine, and the window then
+	// leads with OriginTitle and OriginNote in a card of their own. Nothing a
+	// requester sends can produce that card: only the hub sets Origin.
+	Origin      string `json:"origin,omitempty"`
+	OriginTitle string `json:"origin_title,omitempty"`
+	OriginNote  string `json:"origin_note,omitempty"`
 }
 
 // NewView lays out r for the window. Everything in it except Requester came
@@ -79,6 +85,15 @@ func NewView(r Request, timeout time.Duration) View {
 	}
 	if r.Approved > 0 {
 		v.Approved = fmt.Sprintf("Plus %d already approved.", r.Approved)
+	}
+	if origin := clean(r.Origin, 60); origin != "" {
+		v.Origin = origin
+		v.Title = "Secret request from " + origin
+		v.Subtitle = "credlock · another machine is asking"
+		v.Question = fmt.Sprintf("Allow %s's command to use %d %s?", origin, n, noun)
+		v.OriginTitle = fmt.Sprintf("From %s, another machine on your tailnet", origin)
+		v.OriginNote = fmt.Sprintf("Tailscale verified that this request comes from %s. The command, directory and reason are what %s reports. If you allow it, the values are sent to %s.", origin, origin, origin)
+		v.Footer = fmt.Sprintf("Values go only to this command's environment on %s, and are never printed.", origin)
 	}
 	return v
 }

@@ -52,6 +52,19 @@ func TestTheViewShowsWhoWhatAndWhy(t *testing.T) {
 	}
 }
 
+func TestARemoteRequestSaysSoFirst(t *testing.T) {
+	r := sample
+	r.Origin = "papaya"
+	v := NewView(r, time.Minute)
+	if v.Origin != "papaya" || v.Title != "Secret request from papaya" || !strings.Contains(v.OriginTitle, "another machine") ||
+		!strings.Contains(v.OriginNote, "sent to papaya") || v.Question != "Allow papaya's command to use 2 secrets?" {
+		t.Fatalf("%+v", v)
+	}
+	if local := NewView(sample, time.Minute); local.Origin != "" || local.OriginTitle != "" {
+		t.Fatalf("a local request got a remote card: %+v", local)
+	}
+}
+
 func TestTheViewCountsOneSecret(t *testing.T) {
 	r := sample
 	r.Secrets = r.Secrets[:1]

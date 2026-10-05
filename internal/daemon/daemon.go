@@ -231,7 +231,7 @@ func (s *Server) handle(conn *net.UnixConn) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		go watchHangup(conn, cancel)
-		reply(conn, s.resolve(ctx, req, "", fmt.Sprintf("%s (pid %d)", peer.Name, peer.PID)))
+		reply(conn, s.resolve(ctx, req, "", fmt.Sprintf("this Mac: %s (pid %d)", peer.Name, peer.PID)))
 	case proto.OpStatus:
 		s.mu.Lock()
 		entries := s.cache.list(s.Now())
@@ -286,6 +286,7 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, origin, request
 			Command:   req.Command,
 			Cwd:       req.Cwd,
 			Requester: requester,
+			Origin:    origin,
 			Account:   firstNonEmpty(req.AccountLabel, req.Account),
 			Secrets:   missing,
 			Approved:  len(uniqueRefs(req.Secrets)) - len(uniqueRefs(missing)),

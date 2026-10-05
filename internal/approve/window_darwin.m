@@ -411,6 +411,22 @@ static CLWindow *build(NSDictionary *v, int timeout) {
 
   NSTextField *question = text(str(v, @"question"), sys(17, NSFontWeightSemibold), NSColor.labelColor, kInner);
 
+  // From another machine: said first, in a card nothing a requester sends
+  // can produce.
+  NSView *origin = nil;
+  if (str(v, @"origin").length) {
+    CGFloat words = kCardInner - 42 - kIconGap;
+    origin = card(NSColor.systemBlueColor, hstack(@[
+                    badge(@"network", 42, NSColor.systemBlueColor, YES),
+                    vstack(@[
+                      text(str(v, @"origin_title"), sys(15, NSFontWeightSemibold), NSColor.labelColor, words),
+                      text(str(v, @"origin_note"), sys(12, NSFontWeightRegular), NSColor.secondaryLabelColor, words),
+                    ],
+                           kLabelGap),
+                  ],
+                                                    kIconGap, NSLayoutAttributeCenterY));
+  }
+
   // Why.
   CGFloat reasonWords = kCardInner - 42 - kIconGap;
   NSView *reason = card(NSColor.systemOrangeColor, hstack(@[
@@ -502,7 +518,12 @@ static CLWindow *build(NSDictionary *v, int timeout) {
   [footer addView:w.countdown inGravity:NSStackViewGravityTrailing];
   fixWidth(footer, kInner);
 
-  NSStackView *root = vstack(@[ header, question, reason, details, secrets, buttons, footer ], kSection);
+  NSMutableArray *blocks = [NSMutableArray arrayWithObject:header];
+  if (origin) {
+    [blocks addObject:origin];
+  }
+  [blocks addObjectsFromArray:@[ question, reason, details, secrets, buttons, footer ]];
+  NSStackView *root = vstack(blocks, kSection);
   [root setCustomSpacing:20 afterView:header];
   [root setCustomSpacing:18 afterView:question];
   [root setCustomSpacing:28 afterView:secrets];

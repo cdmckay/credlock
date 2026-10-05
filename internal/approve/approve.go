@@ -21,11 +21,14 @@ type Request struct {
 	Command   []string
 	Cwd       string
 	Requester string // e.g. "bash (pid 4242)", from the kernel
-	Account   string
-	Secrets   []proto.Secret // the ones not yet approved
-	Approved  int            // how many others the request also uses, already approved
-	Window    time.Duration  // an approval lasts this long after its last use...
-	Cap       time.Duration  // ...and never longer than this
+	// Origin is the tailnet machine that asked, as Tailscale identified it;
+	// empty for this Mac. Its command, directory and reason are its own claims.
+	Origin   string
+	Account  string
+	Secrets  []proto.Secret // the ones not yet approved
+	Approved int            // how many others the request also uses, already approved
+	Window   time.Duration  // an approval lasts this long after its last use...
+	Cap      time.Duration  // ...and never longer than this
 }
 
 // Approver decides a request. false with a nil error means "denied";
@@ -88,6 +91,9 @@ func Body(r Request) string {
 	fmt.Fprintf(&b, "Reason:  %s\n", reason)
 	fmt.Fprintf(&b, "Command:  %s\n", clean(quote(r.Command), 300))
 	fmt.Fprintf(&b, "Directory:  %s\n", clean(tildify(r.Cwd), 200))
+	if r.Origin != "" {
+		fmt.Fprintf(&b, "FROM ANOTHER MACHINE:  %s, over Tailscale\n", clean(r.Origin, 100))
+	}
 	fmt.Fprintf(&b, "Requested by:  %s\n", clean(r.Requester, 100))
 	if r.Account != "" {
 		fmt.Fprintf(&b, "1Password account:  %s\n", clean(r.Account, 100))
