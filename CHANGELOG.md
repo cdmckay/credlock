@@ -21,7 +21,9 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
   network, can use `credlock run`. A Mac turned on with `credlock hub on`
   answers them: it shows its usual approval window, which says first which
   machine is asking, and sends the values back over the tailnet. The other
-  machine keeps nothing.
+  machine keeps nothing. A login item keeps the Mac answering after a
+  restart; `credlock hub off` removes it and stops the helper, forgetting
+  every approval.
 - Pairing: `credlock pair MAC` on the other machine pairs its user with the
   Mac, in a window that shows a code its terminal shows too. Each user there
   gets a key of their own, made on first use, and the Mac has its own; they

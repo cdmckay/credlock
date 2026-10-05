@@ -59,7 +59,8 @@ that holds an approval for it answers without a window.
 1. **On the Mac:** `credlock hub on`. It remembers the tailnet the Mac is on,
    listens only there, and adds a login item, so it keeps answering after a
    restart. `credlock hub status` lists the machines paired with it, and
-   `credlock hub off` stops it.
+   `credlock hub off` stops it, and the helper with it, forgetting every
+   approval.
 2. **On the other machine:** `credlock pair potato`, naming the Mac. The Mac
    shows a pairing window with a four-digit code, the terminal shows the
    same code, and its Pair button pairs them. From then on `credlock run`

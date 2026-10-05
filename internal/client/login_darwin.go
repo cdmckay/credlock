@@ -109,12 +109,12 @@ func removeLoginItem() error {
 	if err != nil {
 		return err
 	}
-	// Only the file goes. Unloading the job would kill the helper if launchd
-	// started it, and every approval with it; with hub mode off it idles out
-	// as usual, and without the file launchd doesn't start it at the next
-	// login.
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	// Unload the job too, so launchd doesn't start the helper again before
+	// the next login. credlock hub off has stopped the helper already; a job
+	// that isn't loaded fails to unload, harmlessly.
+	_ = launchctl("bootout", fmt.Sprintf("gui/%d/%s", os.Getuid(), loginItem))
 	return nil
 }

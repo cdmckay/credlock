@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -38,9 +39,20 @@ func Hub(args []string) int {
 			fmt.Fprintf(os.Stderr, "credlock: hub mode is on, but it won't come back after a restart until you run credlock hub on again: %v\n", err)
 		}
 	case proto.HubOff:
+		// Rare, so it ends cleanly rather than leaving a helper behind: the
+		// helper stops first, so it exits rather than being killed, and
+		// forgets every approval, this Mac's own too. Then the login item goes.
+		_, stopErr := Call(proto.Request{Op: proto.OpStop}, false)
 		if err := removeLoginItem(); err != nil {
 			fmt.Fprintf(os.Stderr, "credlock: couldn't remove the login item: %v\n", err)
 		}
+		printHub(resp.Hub)
+		if stopErr != nil && !errors.Is(stopErr, errNotRunning) {
+			fmt.Fprintf(os.Stderr, "credlock: couldn't stop the helper (%v); run credlock stop\n", stopErr)
+			return 1
+		}
+		fmt.Println("credlock: the helper stopped, so every approval is gone, this Mac's too.")
+		return 0
 	case proto.HubForget:
 		fmt.Printf("credlock: forgot %s; it pairs again, in a pairing window, the next time it asks (or with credlock pair there)\n", req.Host)
 	}

@@ -23,8 +23,9 @@ Other machines
   'credlock hub on' on the Mac, then 'credlock pair MAC' on the machine, and
   answer the pairing window on the Mac (its code matches the one printed
   here). After that, credlock run works the same there, and its approvals
-  are that machine's alone. A Mac that answers with a different key from
-  the one it paired with is refused; after a reinstall on it, run
+  are that machine's alone. 'credlock hub off' turns it off and stops the
+  helper, forgetting every approval. A Mac that answers with a different key
+  from the one it paired with is refused; after a reinstall on it, run
   'credlock pair --forget MAC', then pair again.
 
 Other commands

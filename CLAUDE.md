@@ -146,8 +146,9 @@ with the cost of each way around it.
   match. The hub commits to its part first and reveals it only with a
   counted pairing window.
 - **`launchctl bootout` kills a loaded job's running process,** and after a
-  login the running helper is launchd's. Reloading the login item would drop
-  every approval, so credlock only writes or removes the file.
+  login the running helper is launchd's. So `credlock hub on` never reloads a
+  loaded job, which would drop every approval. `credlock hub off` stops the
+  helper on purpose, first, so it exits cleanly, then unloads the job.
 
 ## Working on it
 
