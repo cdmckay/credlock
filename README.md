@@ -186,11 +186,14 @@ mode 0700 and refuses to use if anyone else owns it.
   pairing a 1 in 10,000 chance per window, so check the device the window
   names too. A machine's first contact with a Mac (`credlock pair`, a
   first request through `[client] hubs`, or pairing again after `credlock
-  pair --forget`, or a Mac named differently in `[client] hubs` from how
-  it was paired) trusts the Mac that answers, as SSH trusts a new host:
+  pair --forget`) trusts the Mac that answers, as SSH trusts a new host:
   pair only when the Mac's window shows your terminal's code, and if no
-  window appeared, don't trust it. The Mac has to be awake, on the tailnet,
-  with hub mode on.
+  window appeared, don't trust it. A machine remembers a Mac's key under
+  the name it used, so name each Mac the same way everywhere: another name
+  for it in `[client] hubs` (its full MagicDNS name, or an address) is a
+  first contact too, and one with no window to check, since the Mac already
+  knows the machine. The Mac has to be awake, on the tailnet, with hub mode
+  on.
 - Approving needs a Mac for now; other systems, such as Linux servers, ask
   one (above). The operating-system pieces sit behind `internal/platform`. On
   Linux, approvals would use a plain zenity dialog until credlock has a

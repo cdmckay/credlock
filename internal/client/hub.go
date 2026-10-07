@@ -44,7 +44,7 @@ func Hub(args []string) int {
 		// forgets every approval, this Mac's own too. Then the login item goes.
 		_, stopErr := Call(proto.Request{Op: proto.OpStop}, false)
 		if err := removeLoginItem(); err != nil {
-			fmt.Fprintf(os.Stderr, "credlock: couldn't remove the login item: %v\n", err)
+			fmt.Fprintf(os.Stderr, "credlock: couldn't remove the login item: %v. Hub mode is off either way, so a helper it starts doesn't listen\n", err)
 		}
 		printHub(resp.Hub)
 		if stopErr != nil && !errors.Is(stopErr, errNotRunning) {

@@ -27,10 +27,10 @@ type Request struct {
 	// empty for this Mac. User is the user it says asked. Those, its
 	// command, directory and reason are its own claims.
 	Origin, User string
-	// Pairing is "new" for a machine user this hub hasn't paired with; Allow
-	// pairs it. Code is the four digits its terminal shows for this pairing. A
-	// key that differs from the paired one never reaches a window: the hub
-	// refuses it.
+	// Pairing is "new" for a machine user this hub hasn't paired with; the
+	// pairing window's Pair button pairs it. Code is the four digits its
+	// terminal shows for this pairing. A key that differs from the paired one
+	// never reaches a window: the hub refuses it.
 	Pairing, Code string
 	Account       string
 	Secrets       []proto.Secret // the ones not yet approved

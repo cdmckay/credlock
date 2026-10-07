@@ -112,9 +112,15 @@ func removeLoginItem() error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	// Unload the job too, so launchd doesn't start the helper again before
-	// the next login. credlock hub off has stopped the helper already; a job
-	// that isn't loaded fails to unload, harmlessly.
-	_ = launchctl("bootout", fmt.Sprintf("gui/%d/%s", os.Getuid(), loginItem))
+	// Unload the job too, if it is loaded, so launchd doesn't start the
+	// helper again before the next login. credlock hub off has stopped the
+	// helper already.
+	job := fmt.Sprintf("gui/%d/%s", os.Getuid(), loginItem)
+	if launchctl("print", job) != nil {
+		return nil
+	}
+	if err := launchctl("bootout", job); err != nil {
+		return fmt.Errorf("%w (to unload it by hand: launchctl bootout %s)", err, job)
+	}
 	return nil
 }
