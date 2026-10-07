@@ -7,6 +7,8 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
 ### Security
 
 - Hub mode lets other machines ask a Mac for secrets. With `credlock hub on`,
@@ -23,7 +25,9 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
   machine is asking, and sends the values back over the tailnet. The other
   machine keeps nothing. A login item keeps the Mac answering after a
   restart; `credlock hub off` removes it and stops the helper, forgetting
-  every approval.
+  every approval. Hub mode needs Tailscale on every machine involved. After
+  upgrading from 0.2, run `credlock stop` once before `credlock hub on` if a
+  helper is still running: a 0.2 helper doesn't know hub mode.
 - Pairing: `credlock pair MAC` on the other machine pairs its user with the
   Mac, in a window that shows a code its terminal shows too. Each user there
   gets a key of their own, made on first use, and the Mac has its own; they
@@ -95,7 +99,8 @@ The first release. macOS only.
 - A Nix flake, and a Homebrew formula in
   [cdmckay/homebrew-tap](https://github.com/cdmckay/homebrew-tap).
 
-[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cdmckay/credlock/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/cdmckay/credlock/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cdmckay/credlock/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cdmckay/credlock/releases/tag/v0.1.0
