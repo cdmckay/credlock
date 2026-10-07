@@ -35,6 +35,7 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
   `credlock pair --forget MAC` forgets a Mac's key after a reinstall there.
 - A menu bar alert: the key turns red, and its menu says what happened, until
   dismissed.
+- The menu bar menu shows the running helper's version at its foot.
 - A request whose asker goes away, such as a `credlock run` stopped with
   Ctrl-C, now closes its approval window.
 

@@ -139,3 +139,12 @@ func TestTimeLeftReads(t *testing.T) {
 		}
 	}
 }
+
+func TestTheMenuBarShowsTheHelpersVersion(t *testing.T) {
+	bar := &fakeBar{}
+	h := newHarness(t, true, withBar(bar), func(s *Server) { s.Version = "9.8.7+abc1234" })
+	h.ok(sec("A", "op://v/a/f"))
+	if v := bar.last().Version; v != "9.8.7+abc1234" {
+		t.Fatalf("version %q", v)
+	}
+}

@@ -30,6 +30,9 @@ type Snapshot struct {
 	// with a key it didn't pair with. The key turns red until they're
 	// dismissed.
 	Alerts []Alert `json:"alerts,omitempty"`
+	// Version is the running helper's, shown at the foot of the menu: the
+	// one serving requests, even after an upgrade on disk.
+	Version string `json:"version,omitempty"`
 }
 
 // Alert is one thing to look at.

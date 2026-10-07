@@ -66,6 +66,8 @@ type Server struct {
 	// Bar is told what is held and how it is used, after every change. Nil
 	// for none.
 	Bar Notifier
+	// Version is credlock's, for the foot of the menu bar's menu.
+	Version string
 	// Identify names the tailnet host at a remote address: tailscale whois,
 	// unless a test fakes it.
 	Identify func(net.Addr) (string, error)
@@ -161,6 +163,7 @@ func Main(version string) error {
 	// One resolver process per account: the 1Password SDK can only reach one
 	// account per process (cdmckay/credlock#8).
 	s := NewServer(&provider.Isolated{Version: version}, approve.Default(ApprovalTimeout))
+	s.Version = version
 	s.Exit = func() { _ = os.Remove(path); os.Exit(0) }
 	if menubar.Supported {
 		s.Bar = menubar.New(s.act)
@@ -416,7 +419,7 @@ func (s *Server) notify(read bool) {
 	}
 	s.mu.Lock()
 	now := s.Now()
-	snap := menubar.Snapshot{Read: read, Uses: append([]menubar.Use(nil), s.uses...), Alerts: append([]menubar.Alert(nil), s.alerts...)}
+	snap := menubar.Snapshot{Read: read, Uses: append([]menubar.Use(nil), s.uses...), Alerts: append([]menubar.Alert(nil), s.alerts...), Version: s.Version}
 	for _, e := range s.cache.list(now) {
 		k := key{e.Origin, e.Account, e.Ref}
 		snap.Held = append(snap.Held, menubar.Held{

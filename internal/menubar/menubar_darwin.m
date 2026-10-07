@@ -231,7 +231,7 @@ static NSMenuItem *heldEntry(NSDictionary *held) {
   return m;
 }
 
-static void rebuild(NSArray *held, NSArray *uses, NSArray *alerts) {
+static void rebuild(NSArray *held, NSArray *uses, NSArray *alerts, NSString *version) {
   [menu removeAllItems];
   if (alerts.count) {
     // Alerts first, in red: something to look at.
@@ -285,6 +285,10 @@ static void rebuild(NSArray *held, NSArray *uses, NSArray *alerts) {
   NSMenuItem *stop = [[NSMenuItem alloc] initWithTitle:@"Stop credlock" action:@selector(stop:) keyEquivalent:@""];
   stop.target = target;
   [menu addItem:stop];
+  if (version.length) {
+    [menu addItem:[NSMenuItem separatorItem]];
+    [menu addItem:note([@"credlock " stringByAppendingString:version])];
+  }
 }
 
 static void apply(NSDictionary *v) {
@@ -292,7 +296,7 @@ static void apply(NSDictionary *v) {
   NSArray *alerts = list(v, @"alerts");
   heldCount = held.count;
   alertCount = alerts.count;
-  rebuild(held, list(v, @"uses"), alerts);
+  rebuild(held, list(v, @"uses"), alerts, str(v, @"version"));
   item.visible = heldCount > 0 || alertCount > 0;
   BOOL isRead = [v[@"read"] isKindOfClass:[NSNumber class]] && [v[@"read"] boolValue];
   if (isRead && heldCount > 0) {
