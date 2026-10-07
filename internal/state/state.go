@@ -253,3 +253,24 @@ func ParsePublicKey(s string) (ed25519.PublicKey, error) {
 	}
 	return ed25519.PublicKey(b), nil
 }
+
+// Phone is what a hub keeps for approving from a phone (#14): its VAPID key,
+// which signs every push, and the phone's push subscription.
+type Phone struct {
+	// VAPID is the hub's push-signing key, PKCS #8 DER.
+	VAPID []byte `json:"vapid,omitempty"`
+	// Device is the phone's Tailscale name, Subscription its push
+	// subscription as the browser gave it.
+	Device       string          `json:"device,omitempty"`
+	Subscription json.RawMessage `json:"subscription,omitempty"`
+}
+
+// LoadPhone reads the phone state; never set up is empty.
+func LoadPhone() (Phone, error) {
+	var p Phone
+	err := read("phone.json", &p)
+	return p, err
+}
+
+// Save writes the phone state.
+func (p Phone) Save() error { return write("phone.json", p) }

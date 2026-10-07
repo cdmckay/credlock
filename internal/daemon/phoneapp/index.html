@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="credlock">
+<meta name="color-scheme" content="light dark">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="stylesheet" href="/app.css">
+<title>credlock</title>
+</head>
+<body>
+<main>
+  <h1>credlock</h1>
+  <p id="where" class="muted"></p>
+
+  <section id="install" hidden>
+    <h2>Add credlock to your Home Screen</h2>
+    <p>Notifications only reach web apps on the Home Screen.</p>
+    <ol>
+      <li>Tap the Share button.</li>
+      <li>Choose <b>Add to Home Screen</b>.</li>
+      <li>Open <b>credlock</b> from your Home Screen.</li>
+    </ol>
+  </section>
+
+  <section id="enable" hidden>
+    <h2>Turn on notifications</h2>
+    <p>credlock will notify this phone when a request needs your approval.</p>
+    <button id="subscribe">Turn on notifications</button>
+  </section>
+
+  <section id="ready" hidden>
+    <h2>Notifications are on</h2>
+    <button id="test">Send a test notification</button>
+  </section>
+
+  <section id="message" hidden>
+    <h2>From the notification</h2>
+    <p id="msg"></p>
+  </section>
+
+  <pre id="log"></pre>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
