@@ -49,17 +49,29 @@ async function capabilities() {
   return c;
 }
 
+// refresh shows what is waiting on the hub. It runs whenever the app opens
+// or comes forward, which is what tapping a notification does on iOS.
+async function refresh() {
+  const r = await fetch("/api/pending", { cache: "no-store" });
+  if (!r.ok) throw new Error(`/api/pending: ${r.status} ${await r.text()}`);
+  const items = await r.json();
+  const list = $("items");
+  list.replaceChildren(
+    ...items.map((m) => {
+      const li = document.createElement("li");
+      li.textContent = m.text;
+      return li;
+    }),
+  );
+  $("pending").hidden = items.length === 0;
+}
+
 async function main() {
   const caps = await capabilities();
   post("/api/caps", caps).catch((e) => log(e.message));
   $("where").textContent = standalone ? "Opened from the Home Screen." : "Opened in the browser.";
 
-  const n = new URLSearchParams(location.search).get("n");
-  if (n) {
-    const r = await fetch("/api/message?n=" + encodeURIComponent(n));
-    $("msg").textContent = r.ok ? await r.text() : "That notification has expired.";
-    $("message").hidden = false;
-  }
+  refresh().catch((e) => log(e.message));
 
   if (!caps.serviceWorker || !caps.pushManager) {
     // On iOS, Web Push exists only for web apps opened from the Home Screen.
@@ -108,5 +120,9 @@ $("test").onclick = async () => {
     log(e.message);
   }
 };
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refresh().catch((e) => log(e.message));
+});
 
 main().catch((e) => log(e.message));

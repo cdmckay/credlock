@@ -1,7 +1,12 @@
-// credlock's service worker: show each push as a notification, and open the
-// web app where it points when the notification is tapped. Every push must
-// show a notification: iOS ends a subscription that pushes silently.
+// credlock's service worker: show each push as a notification, and bring
+// the web app forward when one is tapped. The app then asks the hub what is
+// waiting, so nothing here needs to reach the page. Every push must show a
+// notification: iOS ends a subscription that pushes silently.
 "use strict";
+
+// A new version of this worker takes over at once, not once the app has
+// been closed.
+self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("push", (event) => {
   let d = { title: "credlock", body: "" };
@@ -10,26 +15,41 @@ self.addEventListener("push", (event) => {
   } catch (e) {
     d.body = event.data ? event.data.text() : "";
   }
+  // No action buttons: iOS doesn't show them, so a tap opens the app.
   event.waitUntil(
     self.registration.showNotification(d.title || "credlock", {
       body: d.body || "",
       tag: d.tag || "credlock",
-      data: { url: d.url || "/" },
-      // Slice 1 checks whether iOS shows this button at all.
-      actions: [{ action: "review", title: "Review" }],
     }),
   );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || "/";
-  event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
-      for (const w of windows) {
-        if ("navigate" in w) return w.navigate(url).then((c) => (c || w).focus());
-      }
-      return self.clients.openWindow(url);
-    }),
-  );
+  event.waitUntil(open());
 });
+
+// open brings the app forward. iOS does this itself on a tap, opening the
+// app if it was closed; other browsers need the worker to. The report comes
+// after: the tap's gesture doesn't outlast a network round trip, and iOS
+// refuses openWindow without it.
+async function open() {
+  const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const how = windows.length > 0 ? "focus" : "openWindow";
+  try {
+    if (windows.length > 0) await windows[0].focus();
+    else await self.clients.openWindow("/");
+    await report({ notificationclick: how });
+  } catch (e) {
+    await report({ notificationclick: how, error: String(e) });
+  }
+}
+
+// report tells the hub what happened here, which nothing else can see.
+function report(event) {
+  return fetch("/api/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(event),
+  }).catch(() => {});
+}

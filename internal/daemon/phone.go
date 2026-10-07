@@ -43,6 +43,10 @@ const phonePort = "7178"
 // vapidSubject is the contact the push service is given for this sender.
 const vapidSubject = "https://github.com/cdmckay/credlock"
 
+// pendingFor is how long a test notification waits for the phone: as long as
+// the push service is asked to keep it.
+const pendingFor = 5 * time.Minute
+
 //go:embed phoneapp
 var phoneApp embed.FS
 
@@ -134,7 +138,15 @@ type phoneServer struct {
 	key    webpush.Key
 
 	mu       sync.Mutex
-	messages map[string]string // what each test notification said, by ID
+	messages []message // the test notifications sent, oldest first
+}
+
+// message is a test notification, standing in for a request waiting on the
+// phone.
+type message struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+	at   time.Time
 }
 
 func servePhone() error {
@@ -150,7 +162,7 @@ func servePhone() error {
 	if err != nil {
 		return err
 	}
-	s := &phoneServer{suffix: ts.Suffix, self: ts.Self, key: key, messages: map[string]string{}}
+	s := &phoneServer{suffix: ts.Suffix, self: ts.Self, key: key}
 	srv := &http.Server{
 		Handler:           s.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -192,10 +204,11 @@ func (s *phoneServer) routes() http.Handler {
 	mux.HandleFunc("GET /api/vapid", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"key": s.key.Public()})
 	})
-	mux.HandleFunc("POST /api/caps", s.caps)
+	mux.HandleFunc("POST /api/caps", logJSON("supports"))
+	mux.HandleFunc("POST /api/report", logJSON("reports"))
 	mux.HandleFunc("POST /api/subscribe", s.subscribe)
 	mux.HandleFunc("POST /api/test", s.test)
-	mux.HandleFunc("GET /api/message", s.message)
+	mux.HandleFunc("GET /api/pending", s.pending)
 	return s.tailnetOnly(mux)
 }
 
@@ -229,15 +242,19 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func (s *phoneServer) caps(w http.ResponseWriter, r *http.Request) {
-	var caps map[string]any
-	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&caps); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
+// logJSON logs a JSON object the phone sends about itself: what its browser
+// supports, or what its service worker did, which nothing else can see.
+func logJSON(what string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var v map[string]any
+		if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&v); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		b, _ := json.Marshal(v)
+		log.Printf("%s %s: %s", device(r), what, b)
+		w.WriteHeader(http.StatusNoContent)
 	}
-	b, _ := json.Marshal(caps)
-	log.Printf("%s supports: %s", device(r), b)
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *phoneServer) subscribe(w http.ResponseWriter, r *http.Request) {
@@ -291,16 +308,15 @@ func (s *phoneServer) test(w http.ResponseWriter, r *http.Request) {
 	_, _ = rand.Read(id)
 	n := hex.EncodeToString(id)
 	s.mu.Lock()
-	s.messages[n] = text
+	s.messages = append(s.messages, message{ID: n, Text: text, at: time.Now()})
 	s.mu.Unlock()
 	payload, _ := json.Marshal(map[string]string{
 		"title": "credlock",
 		"body":  text,
-		"url":   "/?n=" + n,
 		"tag":   "credlock-" + n,
 	})
 	start := time.Now()
-	err = webpush.Send(r.Context(), s.key, sub, payload, webpush.Options{TTL: 5 * time.Minute, Urgency: "high", Subject: vapidSubject})
+	err = webpush.Send(r.Context(), s.key, sub, payload, webpush.Options{TTL: pendingFor, Urgency: "high", Subject: vapidSubject})
 	if err != nil {
 		log.Printf("push to %s failed: %v", ph.Device, err)
 		http.Error(w, "push failed: "+err.Error(), http.StatusBadGateway)
@@ -310,17 +326,26 @@ func (s *phoneServer) test(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *phoneServer) message(w http.ResponseWriter, r *http.Request) {
+// pending lists the test notifications still waiting, newest first. The app
+// asks whenever it opens or comes forward, rather than being told by the
+// notification it was opened from: iOS opens the app on a tap by itself, and
+// a closed app's service worker can't hand it anything.
+func (s *phoneServer) pending(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	text, ok := s.messages[r.URL.Query().Get("n")]
-	s.mu.Unlock()
-	if !ok {
-		http.Error(w, "no such notification", http.StatusNotFound)
-		return
+	cut := 0
+	for cut < len(s.messages) && time.Since(s.messages[cut].at) > pendingFor {
+		cut++
 	}
-	log.Printf("%s opened notification %s", device(r), r.URL.Query().Get("n"))
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = io.WriteString(w, text)
+	s.messages = s.messages[cut:]
+	list := make([]message, 0, len(s.messages))
+	ids := make([]string, 0, len(s.messages))
+	for i := len(s.messages) - 1; i >= 0; i-- {
+		list = append(list, s.messages[i])
+		ids = append(ids, s.messages[i].ID)
+	}
+	s.mu.Unlock()
+	log.Printf("%s was shown %d pending: %s", device(r), len(list), strings.Join(ids, ", "))
+	writeJSON(w, list)
 }
 
 // pushViaServer asks the running server, over the tailnet, to push text.
