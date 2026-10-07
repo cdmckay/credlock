@@ -48,6 +48,79 @@ account the SDK calls it `Personal` (`op` also takes `Private`), while in
 1Password Business the SDK calls it `Private` (the app and `op` show
 `Employee`). A `vaultNotFound` error lists the account's vaults.
 
+## Other machines on your tailnet
+
+A machine without 1Password, such as a Linux server, can still use
+`credlock run`: it asks a Mac on the same Tailscale network, which shows its
+approval window, fetches from 1Password, and sends the values back over the
+tailnet. The other machine keeps nothing; every run asks again, and a Mac
+that holds an approval for it answers without a window.
+
+**This needs [Tailscale](https://tailscale.com)** on the Mac and on every
+machine that asks it, all in one tailnet, with MagicDNS on. credlock relies
+on Tailscale to say which machine is asking, and asks Macs by their
+Tailscale names. Without Tailscale there is no hub mode; credlock on a
+single Mac needs none of this.
+
+1. **On the Mac:** `credlock hub on`. It remembers the tailnet the Mac is on,
+   listens only there, and adds a login item, so it keeps answering after a
+   restart. `credlock hub status` lists the machines paired with it, and
+   `credlock hub off` stops it, and the helper with it, forgetting every
+   approval.
+2. **On the other machine:** `credlock pair potato`, naming the Mac. The Mac
+   shows a pairing window with a four-digit code, the terminal shows the
+   same code, and its Pair button pairs them. From then on `credlock run`
+   just works there. (Or set `[client] hubs = ["potato"]` in `~/.config/credlock/config.toml`,
+   and the first request pairs in its own window.)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/pairing-window-dark.png">
+  <img src="docs/images/pairing-window-light.png" width="540" alt="The pairing window: 'Pair a user on papaya with this Mac?', with the four-digit code large in a purple card, who is asking, the command and directory, and Don't pair and Pair buttons.">
+</picture>
+
+How it's kept safe:
+
+- **Tailscale says which machine is asking**, and the hub only listens on
+  the tailnet it was turned on in. A caller's full Tailscale name must be in
+  that tailnet, so a device elsewhere can't pass for one of yours.
+- **A key says which user is asking, once paired.** credlock makes one for
+  each user on the other machine, readable only by them, in
+  `~/.local/state/credlock`. The user name is only what that machine
+  reports, and the window says so. What ties a first pairing to you is its
+  code: pair only if the window shows the code your terminal printed. After
+  that, another user there can't ask in your name without your key.
+- **Both ends prove themselves, over TLS 1.3.** The Mac has a key of its
+  own too, and each side's is in the certificate it connects with, so the
+  connection is encrypted and tied to both. The other machine remembers the
+  Mac's key when it pairs and refuses a Mac that answers with another,
+  before it sends anything. Something else holding the Mac's port, such as
+  another user's program there, can't read what a paired machine asks or
+  answer in the Mac's place, and the Mac's menu bar raises an alert when
+  something holds the port. The pairing code comes from the TLS session and
+  from a number each end adds, the Mac committing to its own before it sees
+  the other's. Anything in the middle of a pairing can't steer the two codes
+  to match: it matches by chance, 1 in 10,000, and each try is a pairing
+  window on the Mac, which names the device asking.
+- **A key that doesn't match is refused, and the Mac's menu bar key turns
+  red** with an alert. Either credlock was reinstalled on that machine, which
+  makes a new key, or something else is asking in its name. After a
+  reinstall, re-pair on purpose: `credlock hub forget papaya` on the Mac,
+  then `credlock pair` again. The same goes the other way: a machine refuses
+  a Mac whose key changed until `credlock pair --forget potato` there.
+- **Five pairing windows from one machine that end without Pair** (denied,
+  unanswered, or given up on by the asker) refuse its pairing requests for
+  an hour, so a window can't be put up again and again until it's allowed
+  out of habit.
+- **Approvals are kept per user and machine.** What you allow for papaya is
+  papaya's alone, and nothing the Mac approved for itself is served to it.
+  The window says first, in a card of its own, which machine is asking.
+- **The hub serves only pairing and resolving** over the tailnet, and
+  refuses its own Mac there: local requests use the local socket, where the
+  kernel says which user is asking.
+- **What it can't stop:** root on the other machine, or other programs
+  running as you there, can use your key. New secrets still need your
+  click, and every use shows in the menu bar. More under [Limits](#limits).
+
 ## Commands
 
 | Command | What it does |
@@ -56,6 +129,8 @@ account the SDK calls it `Personal` (`op` also takes `Private`), while in
 | `credlock status` | Whether the helper is running, and what it holds: references and time left, never values. |
 | `credlock clear` | Forget every approved secret. |
 | `credlock stop` | Stop the helper, which forgets everything. |
+| `credlock hub [on \| off \| status \| forget HOST]` | On a Mac: let paired machines on your tailnet ask it ([above](#other-machines-on-your-tailnet)). `off` also stops the helper, forgetting every approval. |
+| `credlock pair [--forget] MAC` | On a machine without 1Password: pair with a Mac in hub mode, or forget its key after credlock was reinstalled there. |
 
 ## How it works
 
@@ -89,7 +164,8 @@ account the SDK calls it `Personal` (`op` also takes `Private`), while in
     <img src="docs/images/menubar-icon-light.png" width="260" alt="The menu bar icon: a key and the number 4 at rest, and the same key with an orange dot on its corner while secrets are being read.">
   </picture>
 - The helper keeps values in memory only, drops each an hour after its last use
-  or a day after its approval, and exits after an idle hour.
+  or a day after its approval, and exits after an idle hour, unless hub mode
+  is on.
 
 The socket lives in `~/Library/Caches/credlock`, a directory credlock keeps at
 mode 0700 and refuses to use if anyone else owns it.
@@ -110,9 +186,27 @@ mode 0700 and refuses to use if anyone else owns it.
   approved.
 - The command you approve can do anything with the secrets it receives, as with
   `op run`.
-- macOS only for now. The operating-system pieces sit behind
-  `internal/platform`. On Linux, approvals would use a plain zenity dialog
-  until credlock has a window there too.
+- **Hub mode needs Tailscale** on every machine involved, in one tailnet.
+- **Other machines, in hub mode:** root on a paired machine, or another
+  program running as you there, can use your credlock key. Any device in the
+  tailnet can put up pairing windows, five an hour per machine, and the user
+  name in them is what that machine reports. The count starts again if the
+  helper restarts. A four-digit code leaves something in the middle of a
+  pairing a 1 in 10,000 chance per window, so check the device the window
+  names too. A machine's first contact with a Mac (`credlock pair`, a
+  first request through `[client] hubs`, or pairing again after `credlock
+  pair --forget`) trusts the Mac that answers, as SSH trusts a new host:
+  pair only when the Mac's window shows your terminal's code, and if no
+  window appeared, don't trust it. A machine remembers a Mac's key under
+  the name it used, so name each Mac the same way everywhere: another name
+  for it in `[client] hubs` (its full MagicDNS name, or an address) is a
+  first contact too, and one with no window to check, since the Mac already
+  knows the machine. The Mac has to be awake, on the tailnet, with hub mode
+  on.
+- Approving needs a Mac for now; other systems, such as Linux servers, ask
+  one (above). The operating-system pieces sit behind `internal/platform`. On
+  Linux, approvals would use a plain zenity dialog until credlock has a
+  window there too.
 
 ## Releases
 

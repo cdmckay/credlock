@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/1password/onepassword-sdk-go v0.4.1
+	github.com/BurntSushi/toml v1.6.0
 	github.com/ncruces/zenity v0.10.15
 	golang.org/x/sys v0.48.0
 )

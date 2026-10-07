@@ -52,6 +52,36 @@ func TestTheViewShowsWhoWhatAndWhy(t *testing.T) {
 	}
 }
 
+func TestARemoteRequestSaysSoFirst(t *testing.T) {
+	r := sample
+	r.Origin, r.User = "papaya", "me"
+	v := NewView(r, time.Minute)
+	if v.Origin != "papaya" || v.Title != "Secret request from papaya" || !strings.Contains(v.OriginTitle, "another machine") ||
+		!strings.Contains(v.OriginNote, "sent to papaya") || v.Question != "Allow papaya's command to use 2 secrets?" ||
+		!strings.Contains(v.OriginNote, "The user, command, directory and reason are what papaya reports") {
+		t.Fatalf("%+v", v)
+	}
+	if local := NewView(sample, time.Minute); local.Origin != "" || local.OriginTitle != "" {
+		t.Fatalf("a local request got a remote card: %+v", local)
+	}
+}
+
+func TestAPairingIsAWindowOfItsOwn(t *testing.T) {
+	r := sample
+	r.Origin, r.User, r.Pairing, r.Code = "papaya", "me", "new", "4821"
+	r.Secrets, r.Approved = nil, 0
+	v := NewView(r, time.Minute)
+	// Tailscale verified the machine; the user is only what the machine says.
+	if v.Kind != "pair" || v.Title != "Pair a user on papaya with this Mac?" || v.Code != "4821" ||
+		!strings.Contains(v.OriginNote, "Tailscale verified that this comes from papaya, which says the user is me") ||
+		!strings.Contains(v.CodeNote, "papaya's terminal") || v.Footer != "Pairing sends no secrets." {
+		t.Fatalf("%+v", v)
+	}
+	if plain := NewView(sample, time.Minute); plain.Kind != "" || plain.Code != "" {
+		t.Fatalf("an approval looked like a pairing: %+v", plain)
+	}
+}
+
 func TestTheViewCountsOneSecret(t *testing.T) {
 	r := sample
 	r.Secrets = r.Secrets[:1]

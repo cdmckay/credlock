@@ -1,10 +1,12 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Account is one 1Password account the op CLI knows about.
@@ -24,7 +26,19 @@ func (a Account) Label() string {
 // configuration, so it never prompts. Without op it returns nothing, and
 // accounts are passed through as given.
 func Accounts() []Account {
-	out, err := exec.Command("op", "account", "list", "--format", "json").Output()
+	return accountsFrom(exec.Command("op", "account", "list", "--format", "json"))
+}
+
+// AccountsWithin is Accounts, giving up after d. With the 1Password app's CLI
+// integration on, op asks the app for the list, and waits while it is locked.
+func AccountsWithin(d time.Duration) []Account {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	return accountsFrom(exec.CommandContext(ctx, "op", "account", "list", "--format", "json"))
+}
+
+func accountsFrom(cmd *exec.Cmd) []Account {
+	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}

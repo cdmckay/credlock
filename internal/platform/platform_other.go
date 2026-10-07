@@ -12,6 +12,10 @@ import (
 // is written yet; until then credlock says so rather than guessing.
 var errUnsupported = errors.New("credlock only supports macOS so far")
 
+// HasHelper says whether this system runs a credlock helper. Without one,
+// credlock asks the hubs in its config instead.
+const HasHelper = false
+
 // SocketPath is not implemented on this system yet.
 func SocketPath() (string, error) { return "", errUnsupported }
 

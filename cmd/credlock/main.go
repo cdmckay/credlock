@@ -55,6 +55,10 @@ func dispatch(cmd string, args []string) int {
 		return client.Clear()
 	case "stop":
 		return client.Stop()
+	case "hub":
+		return client.Hub(args)
+	case "pair":
+		return client.Pair(args)
 	case proto.HelperCommand:
 		if err := daemon.Main(currentVersion()); err != nil {
 			fmt.Fprintln(os.Stderr, "credlock helper:", err)

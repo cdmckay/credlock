@@ -49,7 +49,15 @@ func snapshots(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	for name, r := range map[string]Request{"one": one, "two": sample, "many": long} {
+	remote := sample
+	remote.Origin = "papaya"
+	remote.Requester, remote.User = "alice (as papaya reports it)", "alice"
+	remote.Cwd = "/srv/invoiceninja"
+	pairing := remote
+	pairing.Pairing, pairing.Code = "new", "4821"
+	pairing.Secrets, pairing.Approved = nil, 0
+	pairing.Command = []string{"credlock", "pair", "potato"}
+	for name, r := range map[string]Request{"one": one, "two": sample, "many": long, "remote": remote, "pairing": pairing} {
 		for _, dark := range []bool{false, true} {
 			mode := "light"
 			if dark {

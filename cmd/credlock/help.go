@@ -9,16 +9,31 @@ Usage:
   credlock status        what is approved right now, per account (never values)
   credlock clear         forget every approval
   credlock stop          stop the helper, forgetting everything
+  credlock hub [on|off|status|forget HOST]
+                         on a Mac: answer other machines on the tailnet
+  credlock pair [--forget] MAC
+                         on a machine without 1Password: pair with a Mac,
+                         or forget its key after credlock was reinstalled there
   credlock help [run]    this, or just the part about run
   credlock version
 
 ` + runHelp + `
+Other machines
+  A machine without 1Password asks a Mac on the tailnet instead: run
+  'credlock hub on' on the Mac, then 'credlock pair MAC' on the machine, and
+  answer the pairing window on the Mac (its code matches the one printed
+  here). After that, credlock run works the same there, and its approvals
+  are that machine's alone. 'credlock hub off' turns it off and stops the
+  helper, forgetting every approval. A Mac that answers with a different key
+  from the one it paired with is refused; after a reinstall on it, run
+  'credlock pair --forget MAC', then pair again.
+
 Other commands
   status, clear and stop talk to the helper, a per-user background process
-  that credlock starts on first use and that exits after an idle hour. It
-  keeps approved values in memory only. While it holds any, a key in the
-  menu bar shows how many, and gets an orange dot whenever they are read;
-  its menu is the access log.
+  that credlock starts on first use and that exits after an idle hour,
+  unless hub mode is on. It keeps approved values in memory only. While it
+  holds any, a key in the menu bar shows how many, and gets an orange dot
+  whenever they are read; its menu is the access log.
 `
 
 // runHelp is `credlock run --help`.

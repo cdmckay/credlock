@@ -17,15 +17,26 @@ import (
 
 // Request is everything the person is shown before deciding.
 type Request struct {
-	Reason    string
-	Command   []string
-	Cwd       string
-	Requester string // e.g. "bash (pid 4242)", from the kernel
-	Account   string
-	Secrets   []proto.Secret // the ones not yet approved
-	Approved  int            // how many others the request also uses, already approved
-	Window    time.Duration  // an approval lasts this long after its last use...
-	Cap       time.Duration  // ...and never longer than this
+	Reason  string
+	Command []string
+	Cwd     string
+	// Requester is who asked: e.g. "bash (pid 4242)", from the kernel, or
+	// for another machine the user it reports, marked as its report.
+	Requester string
+	// Origin is the tailnet machine that asked, as Tailscale identified it;
+	// empty for this Mac. User is the user it says asked. Those, its
+	// command, directory and reason are its own claims.
+	Origin, User string
+	// Pairing is "new" for a machine user this hub hasn't paired with; the
+	// pairing window's Pair button pairs it. Code is the four digits its
+	// terminal shows for this pairing. A key that differs from the paired one
+	// never reaches a window: the hub refuses it.
+	Pairing, Code string
+	Account       string
+	Secrets       []proto.Secret // the ones not yet approved
+	Approved      int            // how many others the request also uses, already approved
+	Window        time.Duration  // an approval lasts this long after its last use...
+	Cap           time.Duration  // ...and never longer than this
 }
 
 // Approver decides a request. false with a nil error means "denied";
@@ -76,9 +87,9 @@ func Title(r Request) string {
 	return fmt.Sprintf("credlock: allow %d secrets?", len(r.Secrets))
 }
 
-// Body is the dialog's text. Everything in it except Requester came from the
-// client, so each field is flattened onto one line and cut to length: a reason
-// with newlines in it must not be able to draw fake lines into the dialog.
+// Body is the dialog's text. Nearly all of it came from the client, so each
+// field is flattened onto one line and cut to length: a reason with newlines
+// in it must not be able to draw fake lines into the dialog.
 func Body(r Request) string {
 	var b strings.Builder
 	reason := clean(r.Reason, 200)
@@ -88,6 +99,9 @@ func Body(r Request) string {
 	fmt.Fprintf(&b, "Reason:  %s\n", reason)
 	fmt.Fprintf(&b, "Command:  %s\n", clean(quote(r.Command), 300))
 	fmt.Fprintf(&b, "Directory:  %s\n", clean(tildify(r.Cwd), 200))
+	if r.Origin != "" {
+		fmt.Fprintf(&b, "FROM ANOTHER MACHINE:  %s, over Tailscale\n", clean(r.Origin, 100))
+	}
 	fmt.Fprintf(&b, "Requested by:  %s\n", clean(r.Requester, 100))
 	if r.Account != "" {
 		fmt.Fprintf(&b, "1Password account:  %s\n", clean(r.Account, 100))

@@ -11,6 +11,16 @@ const (
 	OpStatus  = "status"
 	OpClear   = "clear"
 	OpStop    = "stop"
+	OpHub     = "hub"  // hub mode: Hub says what to do
+	OpPair    = "pair" // over the tailnet: pair this machine user with the hub
+)
+
+// Hub mode actions, for OpHub.
+const (
+	HubStatus = "status"
+	HubOn     = "on"
+	HubOff    = "off"
+	HubForget = "forget" // unpair Host
 )
 
 // Secret is one environment variable the client wants filled in.
@@ -30,6 +40,36 @@ type Request struct {
 	Command      []string `json:"command,omitempty"`
 	Cwd          string   `json:"cwd,omitempty"`
 	Secrets      []Secret `json:"secrets,omitempty"`
+	// NoPrompt asks only for what is already approved: a request that needs
+	// a new approval gets NotHeld instead of a window. A client asking several
+	// hubs uses it first, so a hub that holds the secrets answers before any
+	// window opens elsewhere.
+	NoPrompt bool `json:"no_prompt,omitempty"`
+
+	// User is the user another machine says is asking. Its key is the one in
+	// its TLS certificate, and Nonce its part of a pairing code (see
+	// internal/channel).
+	User  string `json:"user,omitempty"`
+	Nonce string `json:"nonce,omitempty"`
+
+	// For OpHub.
+	Hub  string `json:"hub,omitempty"`
+	Host string `json:"host,omitempty"`
+}
+
+// HubInfo is hub mode as `credlock hub status` shows it.
+type HubInfo struct {
+	Enabled   bool       `json:"enabled"`
+	Tailnet   string     `json:"tailnet,omitempty"`
+	Listening []string   `json:"listening,omitempty"`
+	Peers     []PeerInfo `json:"peers,omitempty"`
+}
+
+// PeerInfo is one paired machine user.
+type PeerInfo struct {
+	Host     string `json:"host"`
+	User     string `json:"user"`
+	PairedAt string `json:"paired_at"`
 }
 
 // Entry describes one approved secret for `credlock status`. It never carries
@@ -38,6 +78,8 @@ type Entry struct {
 	Account   string `json:"account"`
 	Ref       string `json:"ref"`
 	ExpiresIn int64  `json:"expires_in"` // seconds
+	// Origin is the tailnet host the approval is for; empty for this machine.
+	Origin string `json:"origin,omitempty"`
 }
 
 // Response is the helper's answer.
@@ -45,8 +87,20 @@ type Response struct {
 	Values map[string]string `json:"values,omitempty"` // by reference
 	Denied bool              `json:"denied,omitempty"`
 	// TimedOut marks a denial because nobody answered the dialog.
-	TimedOut bool    `json:"timed_out,omitempty"`
-	Error    string  `json:"error,omitempty"`
-	Entries  []Entry `json:"entries,omitempty"`
-	PID      int     `json:"pid,omitempty"`
+	TimedOut bool `json:"timed_out,omitempty"`
+	// NotHeld answers a NoPrompt request that needs a new approval.
+	NotHeld bool    `json:"not_held,omitempty"`
+	Error   string  `json:"error,omitempty"`
+	Entries []Entry `json:"entries,omitempty"`
+	// Commit is a hub's first line to another machine: a hash of its part of
+	// a pairing code. Pairing comes before its answer, as it opens its
+	// pairing window, with Reveal, that part; the other machine checks it
+	// against Commit and shows the code the window shows.
+	Commit  string `json:"commit,omitempty"`
+	Pairing bool   `json:"pairing,omitempty"`
+	Reveal  string `json:"reveal,omitempty"`
+	// Paired answers OpPair: this machine user is paired with the hub.
+	Paired bool     `json:"paired,omitempty"`
+	Hub    *HubInfo `json:"hub,omitempty"`
+	PID    int      `json:"pid,omitempty"`
 }

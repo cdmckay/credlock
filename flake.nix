@@ -24,7 +24,7 @@
             pname = "credlock";
             inherit version;
             src = self;
-            vendorHash = "sha256-mo8Mng+EEV3nhCaMtwVsVIHE+P+hC7RWg7hz5x+8Cu8=";
+            vendorHash = "sha256-mV/B7JaCEIwmW1slxvaGFuys96AgZ21/yxUlccvXz24=";
             # The 1Password SDK's desktop-app sign-in needs cgo.
             env.CGO_ENABLED = 1;
             ldflags = [ "-s" "-w" "-X main.version=${version}" ];

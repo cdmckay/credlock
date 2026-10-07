@@ -43,11 +43,27 @@ type View struct {
 	Approved     string         `json:"approved,omitempty"`
 	Footer       string         `json:"footer"`
 	Timeout      int            `json:"timeout"` // seconds until it counts as Deny
+	// Origin is set for a request from another machine, and the window then
+	// leads with OriginTitle and OriginNote in a card of their own. Nothing a
+	// requester sends can produce that card: only the hub sets Origin.
+	Origin      string `json:"origin,omitempty"`
+	OriginTitle string `json:"origin_title,omitempty"`
+	OriginNote  string `json:"origin_note,omitempty"`
+	// OriginTone colours the card: "remote" for a paired machine, "pair" for
+	// a first pairing.
+	OriginTone string `json:"origin_tone,omitempty"`
+	// Kind is "pair" for the pairing window, laid out unlike an approval so
+	// it isn't answered by habit, with Code large and CodeNote under it. It
+	// never shows secrets: those are asked about after, in an approval.
+	Kind     string `json:"kind,omitempty"`
+	Code     string `json:"code,omitempty"`
+	CodeNote string `json:"code_note,omitempty"`
 }
 
-// NewView lays out r for the window. Everything in it except Requester came
-// from the client, so it gets the same flattening as Body: a reason with
-// newlines in it must not be able to draw fake lines.
+// NewView lays out r for the window. Nearly all of it came from the client,
+// so all of it gets the same flattening as Body: a reason with newlines in it
+// must not be able to draw fake lines. Only Origin is Tailscale's word, and
+// only the window's origin card states anything as verified.
 func NewView(r Request, timeout time.Duration) View {
 	n := len(r.Secrets)
 	noun := "secrets"
@@ -79,6 +95,27 @@ func NewView(r Request, timeout time.Duration) View {
 	}
 	if r.Approved > 0 {
 		v.Approved = fmt.Sprintf("Plus %d already approved.", r.Approved)
+	}
+	if origin := clean(r.Origin, 60); origin != "" {
+		user := clean(r.User, 40)
+		code := clean(r.Code, 8)
+		v.Origin = origin
+		v.Subtitle = "credlock · another machine is asking"
+		v.Title = "Secret request from " + origin
+		v.Question = fmt.Sprintf("Allow %s's command to use %d %s?", origin, n, noun)
+		v.Footer = fmt.Sprintf("Values go only to this command's environment on %s, and are never printed.", origin)
+		v.OriginTone = "remote"
+		v.OriginTitle = fmt.Sprintf("From %s, another machine on your tailnet", origin)
+		v.OriginNote = fmt.Sprintf("Tailscale verified that this request comes from %s. The user, command, directory and reason are what %s reports. If you allow it, the values are sent to %s.", origin, origin, origin)
+		if r.Pairing == "new" {
+			v.Kind = "pair"
+			v.Title = fmt.Sprintf("Pair a user on %s with this Mac?", origin)
+			v.Subtitle = "credlock · pairing a machine"
+			v.OriginNote = fmt.Sprintf("Tailscale verified that this comes from %s, which says the user is %s. Once paired, that user's key can ask this Mac for secrets, and each new one still needs your Allow.", origin, user)
+			v.Code = code
+			v.CodeNote = fmt.Sprintf("Pair only if %s's terminal shows this code", origin)
+			v.Footer = "Pairing sends no secrets."
+		}
 	}
 	return v
 }
