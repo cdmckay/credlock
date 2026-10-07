@@ -7,6 +7,8 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
 ### Security
 
 - Hub mode lets other machines ask a Mac for secrets. With `credlock hub on`,
@@ -95,7 +97,8 @@ The first release. macOS only.
 - A Nix flake, and a Homebrew formula in
   [cdmckay/homebrew-tap](https://github.com/cdmckay/homebrew-tap).
 
-[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cdmckay/credlock/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/cdmckay/credlock/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cdmckay/credlock/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cdmckay/credlock/releases/tag/v0.1.0
