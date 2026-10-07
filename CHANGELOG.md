@@ -25,7 +25,9 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
   machine is asking, and sends the values back over the tailnet. The other
   machine keeps nothing. A login item keeps the Mac answering after a
   restart; `credlock hub off` removes it and stops the helper, forgetting
-  every approval.
+  every approval. Hub mode needs Tailscale on every machine involved. After
+  upgrading from 0.2, run `credlock stop` once before `credlock hub on` if a
+  helper is still running: a 0.2 helper doesn't know hub mode.
 - Pairing: `credlock pair MAC` on the other machine pairs its user with the
   Mac, in a window that shows a code its terminal shows too. Each user there
   gets a key of their own, made on first use, and the Mac has its own; they
