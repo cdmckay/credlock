@@ -56,6 +56,28 @@ jobs:
       - run: nix build .#default -L
       - run: ./result/bin/credlock --version
 
+  # The servers that run credlock as a client build it from the flake, so
+  # build it here first, on both of their architectures.
+  nix-linux:
+    name: Nix build, ${{ matrix.system }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - run: nix build .#default -L
+      - run: ./result/bin/credlock --version
+
   linux:
     name: Linux (builds; the platform layer is a stub for now)
     runs-on: ubuntu-latest
