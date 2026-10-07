@@ -56,6 +56,12 @@ approval window, fetches from 1Password, and sends the values back over the
 tailnet. The other machine keeps nothing; every run asks again, and a Mac
 that holds an approval for it answers without a window.
 
+**This needs [Tailscale](https://tailscale.com)** on the Mac and on every
+machine that asks it, all in one tailnet, with MagicDNS on. credlock relies
+on Tailscale to say which machine is asking, and asks Macs by their
+Tailscale names. Without Tailscale there is no hub mode; credlock on a
+single Mac needs none of this.
+
 1. **On the Mac:** `credlock hub on`. It remembers the tailnet the Mac is on,
    listens only there, and adds a login item, so it keeps answering after a
    restart. `credlock hub status` lists the machines paired with it, and
@@ -123,6 +129,8 @@ How it's kept safe:
 | `credlock status` | Whether the helper is running, and what it holds: references and time left, never values. |
 | `credlock clear` | Forget every approved secret. |
 | `credlock stop` | Stop the helper, which forgets everything. |
+| `credlock hub [on \| off \| status \| forget HOST]` | On a Mac: let paired machines on your tailnet ask it ([above](#other-machines-on-your-tailnet)). `off` also stops the helper, forgetting every approval. |
+| `credlock pair [--forget] MAC` | On a machine without 1Password: pair with a Mac in hub mode, or forget its key after credlock was reinstalled there. |
 
 ## How it works
 
@@ -178,6 +186,7 @@ mode 0700 and refuses to use if anyone else owns it.
   approved.
 - The command you approve can do anything with the secrets it receives, as with
   `op run`.
+- **Hub mode needs Tailscale** on every machine involved, in one tailnet.
 - **Other machines, in hub mode:** root on a paired machine, or another
   program running as you there, can use your credlock key. Any device in the
   tailnet can put up pairing windows, five an hour per machine, and the user
