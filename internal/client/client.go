@@ -35,55 +35,74 @@ const ExitDenied = 77
 // approvalWindow is how long the dialog waits, for messages; see daemon.ApprovalTimeout.
 const approvalWindow = "2 minutes"
 
+// maxTTL is the longest --ttl: the hour an approval lasts after its last use,
+// daemon.Window. A longer one would keep an unused approval past it.
+const maxTTL = time.Hour
+
 // RunArgs is a parsed `credlock run` command line.
 type RunArgs struct {
 	Reason  string
 	Account string
+	TTL     time.Duration // zero for credlock's own lifetimes
 	Command []string
 }
 
-// ParseRun reads `[--reason TEXT] [--account NAME] [--] COMMAND [ARGS...]`.
+// ParseRun reads `[--reason TEXT] [--account NAME] [--ttl DURATION] [--] COMMAND [ARGS...]`.
 func ParseRun(args []string) (RunArgs, error) {
 	var r RunArgs
 flags:
 	for len(args) > 0 {
 		a := args[0]
+		name, value, inline := strings.Cut(a, "=")
 		switch {
 		case a == "--":
 			args = args[1:]
 			break flags
-		case a == "--reason" || a == "--account":
-			if len(args) < 2 {
-				return r, fmt.Errorf("%s needs a value", a)
-			}
-			set(&r, a, args[1])
-			args = args[2:]
-		case strings.HasPrefix(a, "--reason=") || strings.HasPrefix(a, "--account="):
-			name, value, _ := strings.Cut(a, "=")
-			set(&r, name, value)
+		case name == "--reason" || name == "--account" || name == "--ttl":
 			args = args[1:]
+			if !inline {
+				if len(args) == 0 {
+					return r, fmt.Errorf("%s needs a value", a)
+				}
+				value, args = args[0], args[1:]
+			}
+			if err := set(&r, name, value); err != nil {
+				return r, err
+			}
 		case strings.HasPrefix(a, "-"):
-			return r, fmt.Errorf("unknown flag %s: credlock run takes --account and --reason, before the command; '--' ends them (see 'credlock help run')", a)
+			return r, fmt.Errorf("unknown flag %s: credlock run takes --account, --reason and --ttl, before the command; '--' ends them (see 'credlock help run')", a)
 		default:
 			break flags
 		}
 	}
 	if len(args) == 0 {
-		return r, errors.New("no command given: credlock run [--account ACCOUNT] [--reason TEXT] [--] COMMAND [ARGS...] (see 'credlock help run')")
+		return r, errors.New("no command given: credlock run [--account ACCOUNT] [--reason TEXT] [--ttl DURATION] [--] COMMAND [ARGS...] (see 'credlock help run')")
 	}
 	r.Command = args
 	if r.Account == "" {
-		r.Account = firstNonEmpty(os.Getenv("CREDLOCK_ACCOUNT"), os.Getenv("OP_ACCOUNT"))
+		r.Account = defaultAccount()
 	}
 	return r, nil
 }
 
-func set(r *RunArgs, flag, value string) {
-	if flag == "--reason" {
+func set(r *RunArgs, flag, value string) error {
+	switch flag {
+	case "--reason":
 		r.Reason = value
-	} else {
+	case "--account":
 		r.Account = value
+	case "--ttl":
+		ttl, err := time.ParseDuration(value)
+		if err != nil || ttl < time.Second || ttl > maxTTL {
+			return fmt.Errorf("--ttl takes how long the approval should last, from 1s to 1h, such as 90s or 15m; not %q", value)
+		}
+		r.TTL = ttl
 	}
+	return nil
+}
+
+func defaultAccount() string {
+	return firstNonEmpty(os.Getenv("CREDLOCK_ACCOUNT"), os.Getenv("OP_ACCOUNT"))
 }
 
 // Refs returns every environment variable whose value is a secret reference,
@@ -147,6 +166,7 @@ func Run(args []string) int {
 			Command:      r.Command,
 			Cwd:          cwd,
 			Secrets:      secrets,
+			TTL:          int64(r.TTL / time.Second),
 		}
 		var resp proto.Response
 		switch {
@@ -208,6 +228,91 @@ func Status() int {
 		fmt.Printf("  %s  in %s%s, expires in %s\n", e.Ref, account, forWhom, (time.Duration(e.ExpiresIn) * time.Second).Round(time.Minute))
 	}
 	return 0
+}
+
+// Forget is `credlock forget [--account ACCOUNT] [REF...]`: it drops this
+// machine's approvals for those references, or for the op:// references in
+// the environment if none are named, as credlock run would find them.
+func Forget(args []string) int {
+	account, refs, err := ParseForget(args, os.Environ())
+	if err != nil {
+		return fail(err)
+	}
+	if !platform.HasHelper {
+		return fail(errors.New("this machine keeps no approvals: the Mac it asks holds them, and forgets them an hour after their last use. " +
+			"To keep them shorter, pass --ttl to credlock run"))
+	}
+	accounts := Accounts()
+	label := "every account"
+	if account != "" {
+		if account, label, err = ResolveAccount(account, accounts); err != nil {
+			return fail(err)
+		}
+	}
+	req := proto.Request{Op: proto.OpForget, Account: account}
+	for _, ref := range refs {
+		req.Secrets = append(req.Secrets, proto.Secret{Ref: ref})
+	}
+	resp, err := Call(req, false)
+	switch {
+	case errors.Is(err, errNotRunning):
+		fmt.Println("credlock: helper not running, nothing to forget")
+		return 0
+	case err != nil && strings.HasPrefix(err.Error(), "unknown op"):
+		return fail(errors.New("the helper running now is from an older credlock, which can't forget one approval. " +
+			"credlock stop ends it, forgetting every approval; the next credlock run starts this version's"))
+	case err != nil:
+		return fail(err)
+	case len(resp.Entries) == 0:
+		fmt.Printf("credlock: none of those were approved in %s, so there was nothing to forget\n", label)
+		return 0
+	}
+	names := labels(accounts)
+	for _, e := range resp.Entries {
+		fmt.Printf("credlock: forgot %s in %s\n", e.Ref, firstNonEmpty(names[e.Account], e.Account))
+	}
+	return 0
+}
+
+// ParseForget reads `[--account ACCOUNT] [REF...]`, taking the references
+// from environ when none are named. The account defaults as credlock run's
+// does; empty means every account.
+func ParseForget(args, environ []string) (account string, refs []string, err error) {
+	for len(args) > 0 {
+		a := args[0]
+		name, value, inline := strings.Cut(a, "=")
+		switch {
+		case name == "--account":
+			args = args[1:]
+			if !inline {
+				if len(args) == 0 {
+					return "", nil, errors.New("--account needs a value")
+				}
+				value, args = args[0], args[1:]
+			}
+			account = value
+		case strings.HasPrefix(a, "-"):
+			return "", nil, fmt.Errorf("unknown flag %s: credlock forget takes --account, then the op:// references to forget (see 'credlock help')", a)
+		case !strings.HasPrefix(a, "op://"):
+			return "", nil, fmt.Errorf("%q is not an op:// reference: credlock forget takes the references themselves, such as op://Vault/Item/field", a)
+		default:
+			refs = append(refs, a)
+			args = args[1:]
+		}
+	}
+	if len(refs) == 0 {
+		for _, s := range Refs(environ) {
+			refs = append(refs, s.Ref)
+		}
+	}
+	if len(refs) == 0 {
+		return "", nil, errors.New("nothing to forget: name the op:// references, or run it with them in the environment, as for credlock run. " +
+			"credlock clear forgets every approval")
+	}
+	if account == "" {
+		account = defaultAccount()
+	}
+	return account, refs, nil
 }
 
 // Clear is `credlock clear`.

@@ -57,7 +57,9 @@ func snapshots(dir string) error {
 	pairing.Pairing, pairing.Code = "new", "4821"
 	pairing.Secrets, pairing.Approved = nil, 0
 	pairing.Command = []string{"credlock", "pair", "potato"}
-	for name, r := range map[string]Request{"one": one, "two": sample, "many": long, "remote": remote, "pairing": pairing} {
+	ttl := one
+	ttl.Window, ttl.Cap = 15*time.Minute, 15*time.Minute // credlock run --ttl 15m
+	for name, r := range map[string]Request{"one": one, "two": sample, "many": long, "remote": remote, "pairing": pairing, "ttl": ttl} {
 		for _, dark := range []bool{false, true} {
 			mode := "light"
 			if dark {

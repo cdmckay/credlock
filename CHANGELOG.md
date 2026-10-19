@@ -7,6 +7,23 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Added
+
+- `credlock run --ttl DURATION` says how long a run expects to need its
+  secrets, up to an hour, such as `--ttl 15m`. Their approval then ends that
+  long from now, however often they are used, and the approval window shows
+  it. It only ever shortens an approval, including ones the run uses that
+  were given before. A hub running an older credlock ignores it, and keeps
+  the usual lifetimes.
+- `credlock forget [--account NAME] [REF…]` forgets this machine's approvals
+  for those references at once, so they don't stay approved for the rest of
+  the hour. With no references named, it takes the `op://` variables in the
+  environment, as `credlock run` does. `credlock help` tells agents to use
+  both ([#15](https://github.com/cdmckay/credlock/issues/15)). After
+  upgrading, a helper that is still running from before ignores `--ttl` and
+  can't forget: `credlock stop` once, or wait for it to exit after an idle
+  hour.
+
 ## [0.3.0] - 2026-10-07
 
 ### Security

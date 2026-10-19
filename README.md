@@ -13,6 +13,8 @@ directory, the requesting process, and each secret it wants. If you allow it,
 credlock fetches everything it is missing from 1Password in one call and runs
 the command with the real values in its environment. An approval lasts an hour after its
 last use, and a day at most, so the next hour of runs needs no prompt at all.
+A run that needs less can say so with `--ttl 15m`, and `credlock forget`
+ends an approval as soon as the work is done.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/approval-window-dark.png">
@@ -125,7 +127,8 @@ How it's kept safe:
 
 | Command | What it does |
 |---|---|
-| `credlock run [--reason TEXT] [--account NAME] [--] COMMAND…` | Runs the command with every `op://` environment variable replaced by its secret. Exits 77 if you deny the request. |
+| `credlock run [--reason TEXT] [--account NAME] [--ttl DURATION] [--] COMMAND…` | Runs the command with every `op://` environment variable replaced by its secret. Exits 77 if you deny the request. `--ttl` ends the approval that long from now, up to an hour, such as `15m`; it only ever shortens one. |
+| `credlock forget [--account NAME] [REF…]` | Forget the approvals for these references now, or for the `op://` variables in the environment if none are named. Without an account, in every account. A machine that asks a Mac keeps no approvals of its own to forget: use `--ttl` there. |
 | `credlock status` | Whether the helper is running, and what it holds: references and time left, never values. |
 | `credlock clear` | Forget every approved secret. |
 | `credlock stop` | Stop the helper, which forgets everything. |
@@ -164,8 +167,8 @@ How it's kept safe:
     <img src="docs/images/menubar-icon-light.png" width="260" alt="The menu bar icon: a key and the number 4 at rest, and the same key with an orange dot on its corner while secrets are being read.">
   </picture>
 - The helper keeps values in memory only, drops each an hour after its last use
-  or a day after its approval, and exits after an idle hour, unless hub mode
-  is on.
+  or a day after its approval, sooner if a run asked for less with `--ttl` or
+  it was forgotten, and exits after an idle hour, unless hub mode is on.
 
 The socket lives in `~/Library/Caches/credlock`, a directory credlock keeps at
 mode 0700 and refuses to use if anyone else owns it.
@@ -173,7 +176,9 @@ mode 0700 and refuses to use if anyone else owns it.
 ## Limits
 
 - Within its hour, an approved secret is served to any process running as you,
-  without a prompt. Approvals are not tied to one command.
+  without a prompt. Approvals are not tied to one command. `--ttl` and
+  `credlock forget` make that time shorter, but anything running as you can
+  use the secret until then.
 - **Known attack vector: any app with macOS Accessibility permission can click
   Allow for you.** An agent running inside such an app could approve its own
   request. Without that permission, macOS refuses scripted clicks and keystrokes

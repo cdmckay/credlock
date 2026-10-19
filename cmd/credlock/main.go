@@ -51,6 +51,8 @@ func dispatch(cmd string, args []string) int {
 		return client.Run(args)
 	case "status":
 		return client.Status()
+	case "forget":
+		return client.Forget(args)
 	case "clear":
 		return client.Clear()
 	case "stop":

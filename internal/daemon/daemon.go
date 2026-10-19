@@ -278,6 +278,17 @@ func (s *Server) handle(conn *net.UnixConn) {
 		s.mu.Unlock()
 		s.notify(false)
 		reply(conn, proto.Response{})
+	case proto.OpForget:
+		refs := uniqueRefs(req.Secrets)
+		if len(refs) == 0 {
+			reply(conn, proto.Response{Error: "no references to forget"})
+			return
+		}
+		s.mu.Lock()
+		gone := s.cache.forgetRefs("", req.Account, refs, s.Now())
+		s.mu.Unlock()
+		s.notify(false)
+		reply(conn, proto.Response{Entries: gone})
 	case proto.OpStop:
 		reply(conn, proto.Response{})
 		s.Exit()
@@ -301,6 +312,12 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, from asker) pro
 			return proto.Response{Error: err.Error()}
 		}
 	}
+	// At most the hour after last use, so a TTL only ever shortens an approval.
+	if most := int64(Window / time.Second); req.TTL < 0 || req.TTL > most {
+		return proto.Response{Error: fmt.Sprintf("a TTL is at most an hour (%d seconds), not %d seconds", most, req.TTL)}
+	}
+	ttl := time.Duration(req.TTL) * time.Second
+	window, most := lifetime(ttl)
 
 	values, missing := s.lookup(req, origin)
 	if len(missing) > 0 && req.NoPrompt {
@@ -326,8 +343,8 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, from asker) pro
 			Account:   firstNonEmpty(req.AccountLabel, req.Account),
 			Secrets:   missing,
 			Approved:  len(uniqueRefs(req.Secrets)) - len(uniqueRefs(missing)),
-			Window:    Window,
-			Cap:       Cap,
+			Window:    window,
+			Cap:       most,
 		})
 		if errors.Is(err, approve.ErrTimedOut) {
 			return proto.Response{Denied: true, TimedOut: true}
@@ -352,23 +369,34 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, from asker) pro
 		s.mu.Lock()
 		now := s.Now()
 		for _, ref := range refs {
-			s.cache.put(key{origin, req.Account, ref}, fetched[ref], now)
+			s.cache.put(key{origin, req.Account, ref}, fetched[ref], now, ttl)
 			values[ref] = fetched[ref]
 		}
 		s.mu.Unlock()
 	}
 
-	// Delivered: slide every secret this request used, and log it.
+	// Delivered: slide every secret this request used, no further than its
+	// TTL, and log it.
 	s.mu.Lock()
 	now := s.Now()
 	for ref := range values {
-		s.cache.touch(key{origin, req.Account, ref}, now)
+		s.cache.touch(key{origin, req.Account, ref}, now, ttl)
 	}
 	s.lastUsed = now
 	s.logUse(req, origin, asked, now)
 	s.mu.Unlock()
 	s.notify(true)
 	return proto.Response{Values: values}
+}
+
+// lifetime is how long an approval lasts after its last use, and at most, for
+// a request with this TTL (zero for none). A TTL only ever shortens them.
+func lifetime(ttl time.Duration) (window, most time.Duration) {
+	window, most = Window, Cap
+	if ttl > 0 {
+		window, most = min(window, ttl), min(most, ttl)
+	}
+	return window, most
 }
 
 // asker is who a request comes from.

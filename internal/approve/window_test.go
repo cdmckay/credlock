@@ -52,6 +52,29 @@ func TestTheViewShowsWhoWhatAndWhy(t *testing.T) {
 	}
 }
 
+func TestATTLIsTheWholeLifetime(t *testing.T) {
+	for _, tc := range []struct {
+		window, cap time.Duration
+		want        string
+	}{
+		{15 * time.Minute, 15 * time.Minute, "15 minutes"},
+		{time.Minute, time.Minute, "1 minute"},
+		{time.Hour, time.Hour, "1 hour"},
+		{time.Hour, 24 * time.Hour, "1 hour after last use, 24 hours at most"},
+	} {
+		r := sample
+		r.Window, r.Cap = tc.window, tc.cap
+		if got := NewView(r, time.Minute).Lifetime; got != tc.want {
+			t.Errorf("%s, %s: got %q, want %q", tc.window, tc.cap, got, tc.want)
+		}
+	}
+	r := sample
+	r.Window, r.Cap = 15*time.Minute, 15*time.Minute
+	if body := Body(r); !strings.Contains(body, "stay available for 15 minutes.") {
+		t.Errorf("the plain dialog doesn't say 15 minutes:\n%s", body)
+	}
+}
+
 func TestARemoteRequestSaysSoFirst(t *testing.T) {
 	r := sample
 	r.Origin, r.User = "papaya", "me"

@@ -275,3 +275,53 @@ func TestStatusListsWithoutValues(t *testing.T) {
 		t.Fatalf("status: %+v", resp)
 	}
 }
+
+func TestTheWindowShowsTheLifetimeARunAskedFor(t *testing.T) {
+	h := newHarness(t, true)
+	h.ok(sec("A", "op://v/a/f"))
+	if _, err := client.CallAt(h.sock, proto.Request{
+		Op: proto.OpResolve, Account: "acct", TTL: 600, Secrets: []proto.Secret{sec("B", "op://v/b/f")},
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	dialogs := h.approver.dialogs()
+	if dialogs[0].Window != Window || dialogs[0].Cap != Cap {
+		t.Errorf("without a TTL, the window showed %s and %s", dialogs[0].Window, dialogs[0].Cap)
+	}
+	if dialogs[1].Window != 10*time.Minute || dialogs[1].Cap != 10*time.Minute {
+		t.Errorf("with a 10 minute TTL, the window showed %s and %s", dialogs[1].Window, dialogs[1].Cap)
+	}
+	for _, ttl := range []int64{-1, 3601, 1 << 62} {
+		if _, err := client.CallAt(h.sock, proto.Request{
+			Op: proto.OpResolve, Account: "acct", TTL: ttl, Secrets: []proto.Secret{sec("C", "op://v/c/f")},
+		}, false); err == nil {
+			t.Errorf("accepted a TTL of %d seconds", ttl)
+		}
+	}
+	if n := len(h.approver.dialogs()); n != 2 {
+		t.Errorf("a refused TTL still opened a window: %d windows", n)
+	}
+}
+
+func TestForgettingASecretMeansTheNextRunAsksAgain(t *testing.T) {
+	h := newHarness(t, true)
+	h.ok(sec("A", "op://v/a/f"), sec("B", "op://v/b/f"))
+	resp, err := client.CallAt(h.sock, proto.Request{Op: proto.OpForget, Account: "acct", Secrets: []proto.Secret{{Ref: "op://v/a/f"}}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Entries) != 1 || resp.Entries[0].Ref != "op://v/a/f" || resp.Values != nil {
+		t.Fatalf("forget answered %+v", resp)
+	}
+	h.ok(sec("B", "op://v/b/f"))
+	if len(h.approver.dialogs()) != 1 {
+		t.Fatal("forgetting one secret forgot another")
+	}
+	h.ok(sec("A", "op://v/a/f"))
+	if len(h.approver.dialogs()) != 2 {
+		t.Fatal("a forgotten secret was served without asking")
+	}
+	if _, err := client.CallAt(h.sock, proto.Request{Op: proto.OpForget}, false); err == nil {
+		t.Error("a forget naming nothing was accepted")
+	}
+}

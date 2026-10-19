@@ -233,6 +233,26 @@ func TestAFirstRequestPairsInItsWindowAndThenNeedsNone(t *testing.T) {
 	}
 }
 
+func TestAnotherMachinesTTLReachesTheWindowAndItsApproval(t *testing.T) {
+	r := newRemote(t, "papaya", true)
+	key, a := newKey(t), sec("A", "op://v/a/f")
+	req := resolveReq("acme", a)
+	req.TTL = 300
+	if resp, _ := r.ask(key, "me", req); resp.Values[a.Ref] == "" {
+		t.Fatalf("got %+v", resp)
+	}
+	shown := r.h.approver.dialogs()
+	if len(shown) != 2 || shown[1].Window != 5*time.Minute || shown[1].Cap != 5*time.Minute {
+		t.Fatalf("the approval window showed %+v", shown)
+	}
+	r.h.server.mu.Lock()
+	held := r.h.server.cache.list(r.h.server.Now())
+	r.h.server.mu.Unlock()
+	if len(held) != 1 || held[0].Origin != "me@papaya" || held[0].ExpiresIn > 300 {
+		t.Fatalf("held %+v", held)
+	}
+}
+
 func TestADeniedPairingIsNotRemembered(t *testing.T) {
 	r := newRemote(t, "papaya", false)
 	if resp, _ := r.ask(newKey(t), "me", resolveReq("acme", sec("A", "op://v/a/f"))); !resp.Denied {
@@ -426,7 +446,7 @@ func (p *recordAccount) got() string {
 
 func TestOnlyPairingAndResolvingAreServedOverTheTailnet(t *testing.T) {
 	r := newRemote(t, "papaya", true)
-	for _, op := range []string{proto.OpStatus, proto.OpClear, proto.OpStop, proto.OpHub} {
+	for _, op := range []string{proto.OpStatus, proto.OpClear, proto.OpStop, proto.OpForget, proto.OpHub} {
 		if resp, _ := r.ask(newKey(t), "me", proto.Request{Op: op}); !strings.Contains(resp.Error, "only pairs and resolves") {
 			t.Errorf("%s: %+v", op, resp)
 		}

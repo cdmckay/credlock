@@ -11,8 +11,9 @@ const (
 	OpStatus  = "status"
 	OpClear   = "clear"
 	OpStop    = "stop"
-	OpHub     = "hub"  // hub mode: Hub says what to do
-	OpPair    = "pair" // over the tailnet: pair this machine user with the hub
+	OpForget  = "forget" // drop this machine's approvals for Secrets' references
+	OpHub     = "hub"    // hub mode: Hub says what to do
+	OpPair    = "pair"   // over the tailnet: pair this machine user with the hub
 )
 
 // Hub mode actions, for OpHub.
@@ -45,6 +46,11 @@ type Request struct {
 	// hubs uses it first, so a hub that holds the secrets answers before any
 	// window opens elsewhere.
 	NoPrompt bool `json:"no_prompt,omitempty"`
+	// TTL is the most, in seconds, the approval for these secrets should last
+	// from now (credlock run --ttl). It is at most an hour, the time an
+	// approval lasts after its last use, so it only ever shortens one. Zero
+	// for no limit of its own.
+	TTL int64 `json:"ttl,omitempty"`
 
 	// User is the user another machine says is asking. Its key is the one in
 	// its TLS certificate, and Nonce its part of a pairing code (see

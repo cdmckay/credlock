@@ -5,7 +5,9 @@ package main
 const overview = `credlock gives a command its secrets, after a person approves what it asks for and why.
 
 Usage:
-  credlock run --account ACCOUNT --reason TEXT [--] COMMAND [ARGS...]
+  credlock run --account ACCOUNT --reason TEXT [--ttl DURATION] [--] COMMAND [ARGS...]
+  credlock forget [--account ACCOUNT] [REF...]
+                         forget approvals now, when you are done with them
   credlock status        what is approved right now, per account (never values)
   credlock clear         forget every approval
   credlock stop          stop the helper, forgetting everything
@@ -43,14 +45,15 @@ const runHelp = `credlock run
   environment, then wrap the command:
 
     GITHUB_TOKEN='op://Personal/GitHub/token' \
-      credlock run --account my --reason "open the release PR" -- gh pr create
+      credlock run --account my --reason "open the release PR" --ttl 10m -- gh pr create
 
   Anything not yet approved opens a dialog showing the reason, the command,
   the directory, the requesting process and each secret. Only a person can
   answer it; wait for them. On Allow, the 1Password app may also ask for
   Touch ID. The values then stay available with no prompt for an hour after
-  their last use, and a day at most. They reach only COMMAND's environment:
-  credlock never prints a secret, and has no command that would.
+  their last use, and a day at most, or less with --ttl. They reach only
+  COMMAND's environment: credlock never prints a secret, and has no command
+  that would.
 
   --account ACCOUNT  The 1Password account the references live in. Any of:
                        - the account ID: the account_uuid column of
@@ -63,6 +66,23 @@ const runHelp = `credlock run
                      then $OP_ACCOUNT.
   --reason TEXT      Why COMMAND needs these secrets, in a few plain words.
                      The person reads it in the dialog before deciding.
+  --ttl DURATION     How long you expect to need the secrets, such as 90s or
+                     15m, up to 1h. Their approval then ends that long from
+                     now, however often they are used, and the dialog says
+                     so. It shortens approvals the command uses that were
+                     already given, and never lengthens one.
+
+When you are done
+  Forget the secrets, so they don't stay approved for the rest of the hour.
+  Name the references, or give credlock forget the same environment as
+  credlock run:
+
+    GITHUB_TOKEN='op://Personal/GitHub/token' credlock forget --account my
+
+  Without an account, it forgets them in every account. Approvals are shared
+  by everything running as you, so forgetting one ends it for any other
+  command using it too; that command gets a new dialog. A machine that asks
+  a Mac keeps no approvals of its own to forget: use --ttl there.
 
 References
   op://VAULT/ITEM/FIELD, or op://VAULT/ITEM/SECTION/FIELD, each part by name
