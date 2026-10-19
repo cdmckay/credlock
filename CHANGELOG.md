@@ -7,6 +7,14 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Security
+
+- The Nix flake builds credlock with Go 1.26.9, which fixes vulnerabilities
+  in the standard library's `net/http`, `net/textproto` and `crypto/tls` that
+  credlock's code reaches (GO-2026-6603, -6607, -6608, -6611, -6612, -6613
+  and -6617). Hub mode's connections between machines use `crypto/tls`. The
+  release binaries were already built with the latest Go 1.26.
+
 ### Added
 
 - `credlock run --ttl DURATION` says how long a run expects to need its
