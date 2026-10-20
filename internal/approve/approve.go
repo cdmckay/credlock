@@ -36,7 +36,7 @@ type Request struct {
 	Secrets       []proto.Secret // the ones not yet approved
 	Approved      int            // how many others the request also uses, already approved
 	Window        time.Duration  // an approval lasts this long after its last use...
-	Cap           time.Duration  // ...and never longer than this
+	Cap           time.Duration  // ...and never longer than this, which a request's TTL can bring in
 }
 
 // Approver decides a request. false with a nil error means "denied";
@@ -113,8 +113,12 @@ func Body(r Request) string {
 	if r.Approved > 0 {
 		fmt.Fprintf(&b, "(plus %d already approved)\n", r.Approved)
 	}
-	fmt.Fprintf(&b, "\nApproved secrets stay available for %s after their last use, and %s at most.",
-		human(r.Window), human(r.Cap))
+	if r.Cap <= r.Window {
+		fmt.Fprintf(&b, "\nApproved secrets stay available for %s.", human(r.Cap))
+	} else {
+		fmt.Fprintf(&b, "\nApproved secrets stay available for %s after their last use, and %s at most.",
+			human(r.Window), human(r.Cap))
+	}
 	return b.String()
 }
 
@@ -152,13 +156,24 @@ func tildify(path string) string {
 	return path
 }
 
+// lifetime says how long an approval lasts: "1 hour after last use, 24 hours
+// at most", or just "15 minutes" when a TTL ends it.
+func lifetime(window, cap time.Duration) string {
+	if cap <= window {
+		return human(cap)
+	}
+	return fmt.Sprintf("%s after last use, %s at most", human(window), human(cap))
+}
+
 // human renders the lifetimes the dialog quotes: "1 hour", "24 hours", "90 minutes".
 func human(d time.Duration) string {
 	switch {
-	case d%time.Hour == 0 && d == time.Hour:
+	case d == time.Hour:
 		return "1 hour"
 	case d%time.Hour == 0:
 		return fmt.Sprintf("%d hours", d/time.Hour)
+	case d == time.Minute:
+		return "1 minute"
 	case d%time.Minute == 0:
 		return fmt.Sprintf("%d minutes", d/time.Minute)
 	default:

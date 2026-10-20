@@ -79,7 +79,7 @@ func NewView(r Request, timeout time.Duration) View {
 		Directory:    clean(tildify(r.Cwd), 200),
 		Requester:    clean(r.Requester, 100),
 		Account:      clean(r.Account, 100),
-		Lifetime:     fmt.Sprintf("%s after last use, %s at most", human(r.Window), human(r.Cap)),
+		Lifetime:     lifetime(r.Window, r.Cap),
 		SecretsTitle: fmt.Sprintf("Requested %s (%d)", noun, n),
 		Footer:       "Values go only to this command's environment, and are never printed.",
 		Timeout:      int(timeout / time.Second),

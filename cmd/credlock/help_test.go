@@ -20,6 +20,8 @@ func TestTheHelpCarriesWhatAnAgentNeeds(t *testing.T) {
 		"vaultNotFound",
 		"Only a person can answer it",
 		"never prints a secret",
+		"--ttl DURATION",
+		"credlock forget --account", // and how to clean up after
 	} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("run help lost %q", want)

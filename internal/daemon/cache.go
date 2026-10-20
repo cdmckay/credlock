@@ -15,15 +15,18 @@ type key struct {
 }
 
 type entry struct {
-	value    string
-	approved time.Time
-	expires  time.Time
+	value   string
+	expires time.Time
+	// until is when the approval ends however often it is used: cap after it
+	// was approved, or sooner if a request asked for less (credlock run --ttl).
+	until time.Time
 }
 
 // cache holds approved secrets in the helper's memory, and nowhere else. Every
 // delivery slides an entry's expiry out to window from now, but never past cap
 // after it was approved, so even a secret in constant use is re-approved daily
-// and picks up rotations. Callers hold the server's lock.
+// and picks up rotations. A request's TTL brings that end closer, never
+// further. Callers hold the server's lock.
 type cache struct {
 	window, cap time.Duration
 	entries     map[key]entry
@@ -42,24 +45,37 @@ func (c *cache) peek(k key, now time.Time) (string, bool) {
 	return e.value, true
 }
 
-// put records a freshly approved value.
-func (c *cache) put(k key, value string, now time.Time) {
-	c.entries[k] = entry{value: value, approved: now, expires: c.limit(now, now)}
+// put records a freshly approved value, which lasts at most ttl from now if
+// ttl is positive.
+func (c *cache) put(k key, value string, now time.Time, ttl time.Duration) {
+	until := shorten(now.Add(c.cap), now, ttl)
+	c.entries[k] = entry{value: value, until: until, expires: c.limit(until, now)}
 }
 
-// touch slides a live entry's expiry, because its value was just delivered.
-func (c *cache) touch(k key, now time.Time) {
+// touch slides a live entry's expiry, because its value was just delivered,
+// for a request that wants it to last at most ttl from now if ttl is positive.
+func (c *cache) touch(k key, now time.Time, ttl time.Duration) {
 	if e, ok := c.entries[k]; ok && now.Before(e.expires) {
-		e.expires = c.limit(e.approved, now)
+		e.until = shorten(e.until, now, ttl)
+		e.expires = c.limit(e.until, now)
 		c.entries[k] = e
 	}
 }
 
-func (c *cache) limit(approved, now time.Time) time.Time {
-	if slide, hard := now.Add(c.window), approved.Add(c.cap); slide.Before(hard) {
+func (c *cache) limit(until, now time.Time) time.Time {
+	if slide := now.Add(c.window); slide.Before(until) {
 		return slide
 	}
-	return approved.Add(c.cap)
+	return until
+}
+
+// shorten brings until in to ttl from now, if ttl is positive and that's
+// sooner. It never moves until later.
+func shorten(until, now time.Time, ttl time.Duration) time.Time {
+	if end := now.Add(ttl); ttl > 0 && end.Before(until) {
+		return end
+	}
+	return until
 }
 
 // sweep drops every expired entry, so nothing outlives its expiry by more than
@@ -75,6 +91,32 @@ func (c *cache) sweep(now time.Time) {
 // forget drops one entry.
 func (c *cache) forget(k key) {
 	delete(c.entries, k)
+}
+
+// forgetRefs drops origin's entries for refs, in account, or in every account
+// if account is empty. It describes the live ones it dropped, without values.
+func (c *cache) forgetRefs(origin, account string, refs []string, now time.Time) []proto.Entry {
+	wanted := map[string]bool{}
+	for _, ref := range refs {
+		wanted[ref] = true
+	}
+	var gone []proto.Entry
+	for k, e := range c.entries {
+		if k.origin != origin || !wanted[k.ref] || (account != "" && k.account != account) {
+			continue
+		}
+		delete(c.entries, k)
+		if now.Before(e.expires) {
+			gone = append(gone, proto.Entry{Origin: k.origin, Account: k.account, Ref: k.ref})
+		}
+	}
+	sort.Slice(gone, func(i, j int) bool {
+		if gone[i].Ref != gone[j].Ref {
+			return gone[i].Ref < gone[j].Ref
+		}
+		return gone[i].Account < gone[j].Account
+	})
+	return gone
 }
 
 func (c *cache) clear() {
