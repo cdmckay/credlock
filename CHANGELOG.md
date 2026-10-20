@@ -7,6 +7,8 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-20
+
 ### Security
 
 - The Nix flake builds credlock with Go 1.26.9, which fixes vulnerabilities
@@ -31,6 +33,10 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
   upgrading, a helper that is still running from before ignores `--ttl` and
   can't forget: `credlock stop` once, or wait for it to exit after an idle
   hour.
+- The Nix flake builds credlock on Linux too, for x86_64 and aarch64, so a
+  NixOS machine can install it from the flake and use it to ask a Mac in hub
+  mode. Before, Nix refused to build it there
+  ([#13](https://github.com/cdmckay/credlock/pull/13)).
 
 ## [0.3.0] - 2026-10-07
 
@@ -124,7 +130,8 @@ The first release. macOS only.
 - A Nix flake, and a Homebrew formula in
   [cdmckay/homebrew-tap](https://github.com/cdmckay/homebrew-tap).
 
-[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/cdmckay/credlock/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cdmckay/credlock/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/cdmckay/credlock/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cdmckay/credlock/compare/v0.1.0...v0.2.0
