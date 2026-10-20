@@ -33,6 +33,10 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
   upgrading, a helper that is still running from before ignores `--ttl` and
   can't forget: `credlock stop` once, or wait for it to exit after an idle
   hour.
+- The Nix flake builds credlock on Linux too, for x86_64 and aarch64, so a
+  NixOS machine can install it from the flake and use it to ask a Mac in hub
+  mode. Before, Nix refused to build it there
+  ([#13](https://github.com/cdmckay/credlock/pull/13)).
 
 ## [0.3.0] - 2026-10-07
 
