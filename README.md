@@ -48,7 +48,8 @@ References use the SDK's syntax, `op://vault/item/field`. The built-in
 vault's name differs from the `op` CLI's, and crosses over: in a personal
 account the SDK calls it `Personal` (`op` also takes `Private`), while in
 1Password Business the SDK calls it `Private` (the app and `op` show
-`Employee`). A `vaultNotFound` error lists the account's vaults.
+`Employee`). A `vaultNotFound` error lists the account's vaults, and a
+`fieldNotFound` error lists the item's fields, by name and type, never value.
 
 ## Other machines on your tailnet
 
@@ -191,6 +192,9 @@ mode 0700 and refuses to use if anyone else owns it.
   approved.
 - The command you approve can do anything with the secrets it receives, as with
   `op run`.
+- Allowing a reference whose field doesn't exist tells the requester the names
+  and types of that item's fields (never their values). The window shows the
+  item, so you know which one, but not that its field names will follow.
 - **Hub mode needs Tailscale** on every machine involved, in one tailnet.
 - **Other machines, in hub mode:** root on a paired machine, or another
   program running as you there, can use your credlock key. Any device in the
