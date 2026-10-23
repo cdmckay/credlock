@@ -7,6 +7,22 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Security
+
+- Allowing a reference that fails with `fieldNotFound` now tells the
+  requester the names and types of that item's fields, never their values
+  (below). Before, it learned nothing about the item.
+
+### Changed
+
+- A reference that fails with `fieldNotFound` now names the item's fields:
+  each one's name and type, and its section when it has one, never its
+  value, such as `"username" (Text), "credential" (Concealed)`. An agent
+  that guessed the field wrong no longer has to fall back to `op item get`,
+  with its own Touch ID prompt, to find the right one. The names come only
+  after the person has allowed that reference, through the same 1Password
+  session, so they cost no extra prompt.
+
 ## [0.4.0] - 2026-10-20
 
 ### Security

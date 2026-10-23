@@ -16,6 +16,7 @@ func TestTheHelpCarriesWhatAnAgentNeeds(t *testing.T) {
 		`personal account SDK: "Personal" (op also takes "Private"; the SDK doesn't)`,
 		`1Password Business SDK: "Private" (the app and op show it as "Employee")`,
 		"A vaultNotFound error lists the vaults",
+		"a fieldNotFound error lists the item's fields",
 		"77 the request was denied",
 		"vaultNotFound",
 		"Only a person can answer it",

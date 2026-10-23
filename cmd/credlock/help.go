@@ -91,7 +91,8 @@ References
     personal account     SDK: "Personal"  (op also takes "Private"; the SDK doesn't)
     1Password Business   SDK: "Private"   (the app and op show it as "Employee")
   When in doubt, use the vault's ID. A vaultNotFound error lists the vaults
-  the account has.
+  the account has, and a fieldNotFound error lists the item's fields (names
+  and types, never values), so there is no need for 'op item get'.
 
 Exit status
   COMMAND's own, once it runs.
@@ -102,7 +103,8 @@ Troubleshooting
   vaultNotFound        The vault isn't in that account. Check --account
                        first, then the vault's name.
   itemNotFound         No item by that name or ID in that vault.
-  fieldNotFound        The item has no field by that name.
+  fieldNotFound        The item has no field by that name. The message
+                       names the fields it has: use one of those.
   no 1Password account given
                        Pass --account; the message lists what's set up here.
   connecting to the 1Password app
