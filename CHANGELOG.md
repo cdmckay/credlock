@@ -30,7 +30,9 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
   more match. Every search asks: nothing is kept. It works only on the Mac
   with 1Password, not through a hub. An agent no longer needs `op item
   list` or `op item get`, whose prompts show neither what it is looking for
-  nor what it gets back.
+  nor what it gets back. A helper still running from an older credlock
+  can't search, and says so: `credlock stop` ends it, and the next command
+  starts this version's. Everything else works with it as before.
 - The access log in the menu bar shows what went back for each search, by
   name: each item's reference and field names, in a submenu. The key stays
   in the menu bar for an hour after a search, even with nothing held.
@@ -40,7 +42,6 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 - The access log now also records a request that failed after you allowed
   it, with what its error said, such as a `fieldNotFound`'s field names.
   Before, only deliveries were logged.
-
 - A reference that fails with `fieldNotFound` now names the item's fields:
   each one's name and type, and its section when it has one, never its
   value, such as `"username" (Text), "credential" (Concealed)`. An agent
