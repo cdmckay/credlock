@@ -212,15 +212,49 @@ type hinter struct {
 	listed    bool
 	vaultList []named
 	vaultErr  error
-	items     map[string][]named // by vault ID
+	items     map[string][]named    // by vault ID
+	got       map[[2]string]gotItem // by vault ID and item ID
+}
+
+// gotItem is one item's names, or why they couldn't be had.
+type gotItem struct {
+	item onepassword.Item
+	err  error
 }
 
 func (h *hinter) vaults(ctx context.Context) ([]named, error) {
 	if !h.listed {
 		h.listed = true
-		h.vaultList, h.vaultErr = h.client.Vaults(ctx)
+		h.vaultList, h.vaultErr = bounded(ctx, h.client.Vaults)
 	}
 	return h.vaultList, h.vaultErr
+}
+
+// bounded runs call, but stops waiting for it when ctx ends. The SDK's
+// desktop-app connection ignores ctx, so the only way to keep a time limit is
+// to stop waiting: an abandoned call finishes on its own, and its answer is
+// dropped. Hint lookups go through here, and only names come back from
+// them, so nothing abandoned holds a value.
+func bounded[T any](ctx context.Context, call func(context.Context) (T, error)) (T, error) {
+	var none T
+	if err := ctx.Err(); err != nil {
+		return none, fmt.Errorf("1Password didn't answer in time: %w", err)
+	}
+	type answer struct {
+		v   T
+		err error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		v, err := call(ctx)
+		done <- answer{v, err}
+	}()
+	select {
+	case a := <-done:
+		return a.v, a.err
+	case <-ctx.Done():
+		return none, fmt.Errorf("1Password didn't answer in time: %w", ctx.Err())
+	}
 }
 
 // fields names the fields of the item ref points to, in the item's order:
@@ -242,7 +276,8 @@ func (h *hinter) fields(ctx context.Context, ref string) (string, error) {
 	}
 	items, listed := h.items[vaultID]
 	if !listed {
-		if items, err = h.client.Items(ctx, vaultID); err != nil {
+		items, err = bounded(ctx, func(ctx context.Context) ([]named, error) { return h.client.Items(ctx, vaultID) })
+		if err != nil {
 			return "", fmt.Errorf("listing the vault's items: %w", err)
 		}
 		if h.items == nil {
@@ -254,14 +289,26 @@ func (h *hinter) fields(ctx context.Context, ref string) (string, error) {
 	if !ok {
 		return "", errors.New("no one item by that name or ID")
 	}
-	item, err := h.client.Item(ctx, vaultID, itemID)
-	if err != nil {
-		return "", fmt.Errorf("getting the item: %w", err)
+	// Getting an item fetches its values too, so each item is got once per
+	// request, however many of its references failed.
+	key := [2]string{vaultID, itemID}
+	got, fetched := h.got[key]
+	if !fetched {
+		got.item, got.err = bounded(ctx, func(ctx context.Context) (onepassword.Item, error) {
+			return h.client.Item(ctx, vaultID, itemID)
+		})
+		if h.got == nil {
+			h.got = map[[2]string]gotItem{}
+		}
+		h.got[key] = got
 	}
-	if len(item.Fields) == 0 {
+	if got.err != nil {
+		return "", fmt.Errorf("getting the item: %w", got.err)
+	}
+	if len(got.item.Fields) == 0 {
 		return "", errors.New("the item has no fields")
 	}
-	return fieldList(item), nil
+	return fieldList(got.item), nil
 }
 
 // vaultAndItem splits op://VAULT/ITEM/[SECTION/]FIELD[?attribute=…] into its

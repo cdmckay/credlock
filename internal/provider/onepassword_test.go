@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	onepassword "github.com/1password/onepassword-sdk-go"
 )
@@ -15,17 +16,23 @@ type response = onepassword.Response[onepassword.ResolvedReference, onepassword.
 // fakeClient answers ResolveAll from answer, or fails with err. It holds the
 // vaults, items and fields that explain a reference that doesn't resolve.
 type fakeClient struct {
-	err    error
-	answer func(ref string) response
-	vaults []named
-	items  map[string][]named          // by vault ID
-	item   map[string]onepassword.Item // by "vault ID/item ID"
-	calls  int
-	listed int // calls to Items
-	got    int // calls to Item
+	err       error
+	answer    func(ref string) response
+	vaults    []named
+	vaultsErr error
+	items     map[string][]named          // by vault ID
+	item      map[string]onepassword.Item // by "vault ID/item ID"
+	stuck     chan struct{}               // when set, Item waits for it to close
+	calls     int
+	vaulted   int // calls to Vaults
+	listed    int // calls to Items
+	got       int // calls to Item
 }
 
-func (c *fakeClient) Vaults(context.Context) ([]named, error) { return c.vaults, nil }
+func (c *fakeClient) Vaults(context.Context) ([]named, error) {
+	c.vaulted++
+	return c.vaults, c.vaultsErr
+}
 
 func (c *fakeClient) Items(_ context.Context, vaultID string) ([]named, error) {
 	c.listed++
@@ -38,6 +45,9 @@ func (c *fakeClient) Items(_ context.Context, vaultID string) ([]named, error) {
 
 func (c *fakeClient) Item(_ context.Context, vaultID, itemID string) (onepassword.Item, error) {
 	c.got++
+	if c.stuck != nil {
+		<-c.stuck
+	}
 	item, ok := c.item[vaultID+"/"+itemID]
 	if !ok {
 		return onepassword.Item{}, errors.New("no such item")
@@ -277,7 +287,8 @@ func TestAnItemThatCantBeFoundAgainGetsTheUsualMessageAndWhy(t *testing.T) {
 		"two items have its name": {func(c *fakeClient) {
 			c.items["vaultid1"] = append(c.items["vaultid1"], named{"itemid3", "Spotify"})
 		}, "no one item by that name or ID"},
-		"it has no fields": {func(c *fakeClient) { c.item["vaultid1/itemid1"] = onepassword.Item{} }, "the item has no fields"},
+		"it has no fields":           {func(c *fakeClient) { c.item["vaultid1/itemid1"] = onepassword.Item{} }, "the item has no fields"},
+		"the vaults can't be listed": {func(c *fakeClient) { c.vaultsErr = errors.New("locked") }, "listing the vaults: locked"},
 	} {
 		c := spotify(fieldNotFound)
 		tc.change(c)
@@ -314,8 +325,45 @@ func TestAnItemIsLookedUpOncePerRequest(t *testing.T) {
 	if err == nil || strings.Count(err.Error(), spotifyFields) != 2 {
 		t.Fatalf("got %v", err)
 	}
-	if c.listed != 1 {
-		t.Fatalf("listed the vault's items %d times", c.listed)
+	if c.vaulted != 1 || c.listed != 1 || c.got != 1 {
+		t.Fatalf("listed the vaults %d times, the vault's items %d times, and got the item %d times", c.vaulted, c.listed, c.got)
+	}
+}
+
+func TestAFailedVaultListingIsTriedOncePerRequest(t *testing.T) {
+	c := spotify(func(ref string) response {
+		if strings.HasPrefix(ref, "op://Nope/") {
+			return failure(onepassword.NewResolveReferenceErrorTypeVariantVaultNotFound())
+		}
+		return fieldNotFound(ref)
+	})
+	c.vaultsErr = errors.New("locked")
+	h := &harness{clients: []*fakeClient{c}}
+	_, err := h.provider().ResolveAll(context.Background(), "acct", []string{"op://Personal/Spotify/a", "op://Nope/Spotify/b"})
+	if err == nil || !strings.Contains(err.Error(), "its fields couldn't be listed: listing the vaults: locked") {
+		t.Fatalf("got %v", err)
+	}
+	if c.vaulted != 1 {
+		t.Fatalf("listed the vaults %d times", c.vaulted)
+	}
+}
+
+func TestAStuckLookupStillAnswersInTime(t *testing.T) {
+	c := spotify(fieldNotFound)
+	c.stuck = make(chan struct{})
+	t.Cleanup(func() { close(c.stuck) })
+	h := &harness{clients: []*fakeClient{c}}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := h.provider().ResolveAll(ctx, "acct", []string{"op://Personal/Spotify/token"})
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("waited %s for a stuck lookup", took)
+	}
+	want := "op://Personal/Spotify/token (fieldNotFound: the item has no such field; its fields couldn't be listed: " +
+		"getting the item: 1Password didn't answer in time: context deadline exceeded)"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("got %v", err)
 	}
 }
 
@@ -333,7 +381,7 @@ func TestALongItemIsCut(t *testing.T) {
 func TestNamesOnlyDropsEveryValue(t *testing.T) {
 	c := spotify(nil)
 	item := namesOnly(c.item["vaultid1/itemid1"])
-	if fmt.Sprintf("%+v", item) == "" || strings.Contains(fmt.Sprintf("%+v", item), leaked) {
+	if strings.Contains(fmt.Sprintf("%+v", item), leaked) {
 		t.Fatalf("kept a value: %+v", item)
 	}
 	if len(item.Fields) != 4 || item.Fields[2].Title != "host" || *item.Fields[2].SectionID != "s1" || len(item.Sections) != 1 {
