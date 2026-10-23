@@ -41,13 +41,25 @@ type resolver interface {
 // named is a vault or an item: what a reference may call it by.
 type named struct{ ID, Title string }
 
-type sdkClient struct{ c *onepassword.Client }
+// sdkClient is one account's SDK client. Its calls run one at a time: a hint
+// lookup that bounded stopped waiting for can still be running when the next
+// request comes, and nothing makes overlapping calls safe in the SDK's
+// desktop-app path, which has no lock and re-inits an expired session in
+// place.
+type sdkClient struct {
+	mu sync.Mutex
+	c  *onepassword.Client
+}
 
-func (s sdkClient) ResolveAll(ctx context.Context, refs []string) (onepassword.ResolveAllResponse, error) {
+func (s *sdkClient) ResolveAll(ctx context.Context, refs []string) (onepassword.ResolveAllResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.c.Secrets().ResolveAll(ctx, refs)
 }
 
-func (s sdkClient) Vaults(ctx context.Context) ([]named, error) {
+func (s *sdkClient) Vaults(ctx context.Context) ([]named, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	vaults, err := s.c.Vaults().List(ctx)
 	if err != nil {
 		return nil, err
@@ -59,7 +71,9 @@ func (s sdkClient) Vaults(ctx context.Context) ([]named, error) {
 	return out, nil
 }
 
-func (s sdkClient) Items(ctx context.Context, vaultID string) ([]named, error) {
+func (s *sdkClient) Items(ctx context.Context, vaultID string) ([]named, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	items, err := s.c.Items().List(ctx, vaultID)
 	if err != nil {
 		return nil, err
@@ -71,7 +85,9 @@ func (s sdkClient) Items(ctx context.Context, vaultID string) ([]named, error) {
 	return out, nil
 }
 
-func (s sdkClient) Item(ctx context.Context, vaultID, itemID string) (onepassword.Item, error) {
+func (s *sdkClient) Item(ctx context.Context, vaultID, itemID string) (onepassword.Item, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	item, err := s.c.Items().Get(ctx, vaultID, itemID)
 	return namesOnly(item), err
 }
@@ -95,7 +111,7 @@ func connectSDK(ctx context.Context, account, version string) (resolver, error) 
 	if err != nil {
 		return nil, err
 	}
-	return sdkClient{c}, nil
+	return &sdkClient{c: c}, nil
 }
 
 // ResolveAll fetches refs from account in a single SDK call.
@@ -103,7 +119,10 @@ func (p *OnePassword) ResolveAll(ctx context.Context, account string, refs []str
 	if account == "" {
 		return nil, errors.New("no 1Password account given: pass --account, or set CREDLOCK_ACCOUNT or OP_ACCOUNT")
 	}
-	values, err := p.resolveAll(ctx, account, refs)
+	// Hints must be done before the helper stops waiting for this resolver,
+	// however long 1Password took to answer.
+	hintsBy := time.Now().Add(DefaultResolveTimeout - hintMargin)
+	values, err := p.resolveAll(ctx, account, refs, hintsBy)
 	var missing *unresolved
 	if err != nil && !errors.As(err, &missing) {
 		// The app may have ended this client's session (it idles out after ten
@@ -111,7 +130,7 @@ func (p *OnePassword) ResolveAll(ctx context.Context, account string, refs []str
 		// client, which asks for approval again. Not for references that simply
 		// don't resolve: a new client would only prompt again for nothing.
 		p.forget(account)
-		values, err = p.resolveAll(ctx, account, refs)
+		values, err = p.resolveAll(ctx, account, refs, hintsBy)
 	}
 	return values, err
 }
@@ -146,7 +165,7 @@ func connectError(account string, err error) error {
 		"Settings > Developer > Integrate with other apps is on", account, err)
 }
 
-func (p *OnePassword) resolveAll(ctx context.Context, account string, refs []string) (map[string]string, error) {
+func (p *OnePassword) resolveAll(ctx context.Context, account string, refs []string, hintsBy time.Time) (map[string]string, error) {
 	client, err := p.client(ctx, account)
 	if err != nil {
 		return nil, connectError(account, err)
@@ -160,7 +179,11 @@ func (p *OnePassword) resolveAll(ctx context.Context, account string, refs []str
 	var vaultMissing bool
 	// Same client, same approval: looking up names costs no extra prompt. The
 	// answer is already a failure, so a slow hint mustn't hold it up.
-	hintCtx, cancel := context.WithTimeout(ctx, hintTimeout)
+	by := time.Now().Add(hintTimeout)
+	if hintsBy.Before(by) {
+		by = hintsBy
+	}
+	hintCtx, cancel := context.WithDeadline(ctx, by)
 	defer cancel()
 	hints := &hinter{client: client}
 	for _, ref := range refs {
@@ -199,6 +222,10 @@ func (p *OnePassword) resolveAll(ctx context.Context, account string, refs []str
 // hintTimeout bounds the lookups made to explain the references of one
 // request that didn't resolve, all together.
 const hintTimeout = 30 * time.Second
+
+// hintMargin is how long before the helper's resolver timeout the hints stop,
+// to leave the answer time to get back.
+const hintMargin = 10 * time.Second
 
 // maxHintFields is as many of an item's fields as a hint names.
 const maxHintFields = 50

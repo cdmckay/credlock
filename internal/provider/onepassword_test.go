@@ -367,6 +367,21 @@ func TestAStuckLookupStillAnswersInTime(t *testing.T) {
 	}
 }
 
+func TestHintsEndBeforeTheHelperStopsWaiting(t *testing.T) {
+	c := spotify(fieldNotFound)
+	h := &harness{clients: []*fakeClient{c}}
+	// As if 1Password had taken the request's whole time to answer.
+	_, err := h.provider().resolveAll(context.Background(), "acct", []string{"op://Personal/Spotify/token"}, time.Now())
+	want := "op://Personal/Spotify/token (fieldNotFound: the item has no such field; its fields couldn't be listed: " +
+		"listing the vaults: 1Password didn't answer in time: context deadline exceeded)"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("got %v", err)
+	}
+	if c.vaulted != 0 {
+		t.Fatalf("listed the vaults %d times with no time left", c.vaulted)
+	}
+}
+
 func TestALongItemIsCut(t *testing.T) {
 	item := onepassword.Item{}
 	for i := range maxHintFields + 7 {
