@@ -39,6 +39,17 @@ func (p *fakeProvider) ResolveAll(_ context.Context, _ string, refs []string) (m
 	return out, nil
 }
 
+// Search finds one item named for the term, with fields, and records the term.
+func (p *fakeProvider) Search(_ context.Context, _ string, term string) (proto.Found, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls = append(p.calls, []string{"search:" + term})
+	if p.err != nil {
+		return proto.Found{}, p.err
+	}
+	return proto.Found{Items: []proto.FoundItem{{Ref: "op://Shared/" + term, Vault: "Shared", Title: term, Fields: `"credential" (Concealed)`}}, More: 3}, nil
+}
+
 // fakeApprover answers with allow, records what it was shown, and can be
 // held open to test that dialogs are one at a time.
 func (p *fakeProvider) fail(err error) {

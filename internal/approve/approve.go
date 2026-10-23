@@ -33,10 +33,13 @@ type Request struct {
 	// never reaches a window: the hub refuses it.
 	Pairing, Code string
 	Account       string
-	Secrets       []proto.Secret // the ones not yet approved
-	Approved      int            // how many others the request also uses, already approved
-	Window        time.Duration  // an approval lasts this long after its last use...
-	Cap           time.Duration  // ...and never longer than this, which a request's TTL can bring in
+	// Search is set for a search of item titles, which names items and their
+	// fields but asks for no secret. Secrets is then empty.
+	Search   string
+	Secrets  []proto.Secret // the ones not yet approved
+	Approved int            // how many others the request also uses, already approved
+	Window   time.Duration  // an approval lasts this long after its last use...
+	Cap      time.Duration  // ...and never longer than this, which a request's TTL can bring in
 }
 
 // Approver decides a request. false with a nil error means "denied";
@@ -81,6 +84,9 @@ func (d Dialog) Approve(ctx context.Context, r Request) (bool, error) {
 
 // Title is the dialog's headline.
 func Title(r Request) string {
+	if r.Search != "" {
+		return "credlock: allow a search of item titles?"
+	}
 	if len(r.Secrets) == 1 {
 		return "credlock: allow 1 secret?"
 	}
@@ -107,6 +113,11 @@ func Body(r Request) string {
 		fmt.Fprintf(&b, "1Password account:  %s\n", clean(r.Account, 100))
 	}
 	b.WriteString("\n")
+	if r.Search != "" {
+		fmt.Fprintf(&b, "Search item titles for:  %s\n", clean(r.Search, 100))
+		fmt.Fprintf(&b, "\n%s", SearchNote)
+		return b.String()
+	}
 	for _, s := range r.Secrets {
 		fmt.Fprintf(&b, "%s  →  %s\n", clean(s.Name, 80), clean(s.Ref, 200))
 	}
@@ -121,6 +132,11 @@ func Body(r Request) string {
 	}
 	return b.String()
 }
+
+// SearchNote says what a search sends back, for both the dialog and the
+// window: names, never values, and nothing kept.
+var SearchNote = fmt.Sprintf("If you allow it, it gets back the titles, references and field names of up to %d matching items. "+
+	"Never a value. Nothing is kept: the next search asks again.", proto.MaxFound)
 
 // clean flattens control characters, newlines included, to spaces and cuts s
 // to at most n runes.
@@ -179,6 +195,24 @@ func human(d time.Duration) string {
 	default:
 		return d.String()
 	}
+}
+
+// CheckSearch refuses a search term the window couldn't show exactly as it
+// would be searched: too short, too long to show whole, or holding
+// characters the window flattens.
+func CheckSearch(term string) error {
+	n := len([]rune(term))
+	switch {
+	case strings.TrimSpace(term) != term:
+		return errors.New("a search term can't start or end with a space")
+	case n < proto.MinSearch:
+		return fmt.Errorf("a search takes at least %d characters, so it can't list nearly everything", proto.MinSearch)
+	case n > proto.MaxSearch:
+		return fmt.Errorf("a search takes at most %d characters, which the approval window shows whole", proto.MaxSearch)
+	case clean(term, proto.MaxSearch) != term:
+		return errors.New("a search term can't hold control characters or line breaks")
+	}
+	return nil
 }
 
 // Clean flattens control characters in client text and cuts it to n runes,

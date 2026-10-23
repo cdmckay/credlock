@@ -12,8 +12,32 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 - Allowing a reference that fails with `fieldNotFound` now tells the
   requester the names and types of that item's fields, never their values
   (below). Before, it learned nothing about the item.
+- A requester can now ask to search item titles with `credlock search`
+  (below). Once the person allows it, the requester learns the titles,
+  references and field names of up to 20 items whose titles contain the
+  term it chose, never their values. Before, it could learn names only for
+  an item it already knew the reference of.
+
+### Added
+
+- `credlock search --reason TEXT TERM` finds the items whose titles contain
+  TERM, for an agent that doesn't know a reference. A search window shows
+  the term and the reason, which is required. After Allow, it prints up to
+  20 matching items, best match first, each with a reference ready for a
+  field and its fields' names and types, never a value, and says how many
+  more match. Every search asks: nothing is kept. It works only on the Mac
+  with 1Password, not through a hub. An agent no longer needs `op item
+  list` or `op item get`, whose prompts show neither what it is looking for
+  nor what it gets back.
+- The access log in the menu bar shows what went back for each search, by
+  name: each item's reference and field names, in a submenu. The key stays
+  in the menu bar for an hour after a search, even with nothing held.
 
 ### Changed
+
+- The access log now also records a request that failed after you allowed
+  it, with what its error said, such as a `fieldNotFound`'s field names.
+  Before, only deliveries were logged.
 
 - A reference that fails with `fieldNotFound` now names the item's fields:
   each one's name and type, and its section when it has one, never its

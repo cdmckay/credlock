@@ -58,6 +58,11 @@ type View struct {
 	Kind     string `json:"kind,omitempty"`
 	Code     string `json:"code,omitempty"`
 	CodeNote string `json:"code_note,omitempty"`
+	// Search is the term, for Kind "search": a search of item titles, shown
+	// in a card of its own in place of secrets, with SearchNote saying what
+	// goes back.
+	Search     string `json:"search,omitempty"`
+	SearchNote string `json:"search_note,omitempty"`
 }
 
 // NewView lays out r for the window. Nearly all of it came from the client,
@@ -116,6 +121,16 @@ func NewView(r Request, timeout time.Duration) View {
 			v.CodeNote = fmt.Sprintf("Pair only if %s's terminal shows this code", origin)
 			v.Footer = "Pairing sends no secrets."
 		}
+	}
+	if r.Search != "" {
+		v.Kind = "search"
+		v.Title = "Search request"
+		v.Question = "Allow a search of your 1Password item titles?"
+		v.Search = clean(r.Search, proto.MaxSearch) // whole: CheckSearch refused anything longer
+		v.SearchNote = SearchNote
+		v.Lifetime = "This search only"
+		v.SecretsTitle = ""
+		v.Footer = "Only names go back. No value is sent, and nothing is kept."
 	}
 	return v
 }

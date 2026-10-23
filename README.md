@@ -51,6 +51,19 @@ account the SDK calls it `Personal` (`op` also takes `Private`), while in
 `Employee`). A `vaultNotFound` error lists the account's vaults, and a
 `fieldNotFound` error lists the item's fields, by name and type, never value.
 
+When an agent doesn't know a reference, `credlock search` finds it by the
+item's title, after you've seen what it is looking for and why:
+
+```bash
+credlock search --account my --reason "listing my open pull requests needs a GitHub token" github
+```
+
+The window shows the term and the reason, which a search must give. If you
+allow it, the agent gets back up to 20 matching items, best match first, each
+with its reference and its fields' names and types, never a value. Every
+search asks again, and the access log shows what each one returned. It works
+only on the Mac with 1Password, not from a machine that asks a hub.
+
 ## Other machines on your tailnet
 
 A machine without 1Password, such as a Linux server, can still use
@@ -129,6 +142,7 @@ How it's kept safe:
 | Command | What it does |
 |---|---|
 | `credlock run [--reason TEXT] [--account NAME] [--ttl DURATION] [--] COMMAND…` | Runs the command with every `op://` environment variable replaced by its secret. Exits 77 if you deny the request. `--ttl` ends the approval that long from now, up to an hour, such as `15m`; it only ever shortens one. |
+| `credlock search --reason TEXT [--account NAME] TERM` | Find items whose titles contain the term, when you don't know a reference. After you allow it, prints up to 20 of them with their references and field names, never values. Every search asks. Exits 77 if you deny it. Only on the Mac with 1Password. |
 | `credlock forget [--account NAME] [REF…]` | Forget the approvals for these references now, or for the `op://` variables in the environment if none are named. Without an account, in every account. A machine that asks a Mac keeps no approvals of its own to forget: use `--ttl` there. |
 | `credlock status` | Whether the helper is running, and what it holds: references and time left, never values. |
 | `credlock clear` | Forget every approved secret. |
@@ -161,7 +175,10 @@ How it's kept safe:
   gets an orange dot for a few seconds whenever secrets are read, cached or
   not. Its menu is the access log, the held secrets with the time each has
   left, and Forget and Stop. It runs as another child of the helper, and is
-  sent names, references and times, never values.
+  sent names, references and times, never values. A search, or a request
+  that failed after you allowed it, is logged with what went back by name, in
+  a submenu: the items a search found and their field names, or what the
+  error said. The key stays for an hour after one, even with nothing held.
 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/menubar-icon-dark.png">
@@ -195,6 +212,12 @@ mode 0700 and refuses to use if anyone else owns it.
 - Allowing a reference whose field doesn't exist tells the requester the names
   and types of that item's fields (never their values). The window shows the
   item, so you know which one, but not that its field names will follow.
+- Allowing a search tells the requester the titles, references and field
+  names of up to 20 items whose titles contain its term, and how many more
+  match. The window shows the term and says this, but not which items will
+  match: you see those only afterwards, in the access log. A short, common
+  term such as `ap` can match much of an account. The window shows it, but
+  credlock refuses only terms under two characters.
 - **Hub mode needs Tailscale** on every machine involved, in one tailnet.
 - **Other machines, in hub mode:** root on a paired machine, or another
   program running as you there, can use your credlock key. Any device in the

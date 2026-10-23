@@ -165,14 +165,17 @@ static NSMenuItem *note(NSString *title) {
   return m;
 }
 
-// logEntry is one use: when and what, then why, then which secrets.
+// logEntry is one use: when and what, then why, then which secrets. A search,
+// or a request that failed after Allow, also has what went back, by name, in
+// a submenu.
 static NSMenuItem *logEntry(NSDictionary *use) {
   NSMutableAttributedString *t = [NSMutableAttributedString new];
   // Another machine's use says which: "14:02  papaya · in-api.sh".
   NSString *origin = str(use, @"origin");
-  NSString *when = origin.length
-                       ? [NSString stringWithFormat:@"%@  %@ · %@", str(use, @"at"), origin, str(use, @"command")]
-                       : [NSString stringWithFormat:@"%@  %@", str(use, @"at"), str(use, @"command")];
+  NSString *search = str(use, @"search");
+  NSString *what = search.length ? [NSString stringWithFormat:@"search “%@”", search] : str(use, @"command");
+  NSString *when = origin.length ? [NSString stringWithFormat:@"%@  %@ · %@", str(use, @"at"), origin, what]
+                                 : [NSString stringWithFormat:@"%@  %@", str(use, @"at"), what];
   [t appendAttributedString:[[NSAttributedString alloc]
                                 initWithString:when
                                     attributes:@{NSFontAttributeName : [NSFont menuFontOfSize:13]}]];
@@ -188,12 +191,33 @@ static NSMenuItem *logEntry(NSDictionary *use) {
     }
   }
   BOOL cached = [use[@"cached"] isKindOfClass:[NSNumber class]] && [use[@"cached"] boolValue];
-  NSString *how = cached ? @"from the cache" : @"after you allowed it";
-  NSString *which = [NSString stringWithFormat:@"\n%@ · %@", [names componentsJoinedByString:@", "], how];
+  BOOL failed = [use[@"failed"] isKindOfClass:[NSNumber class]] && [use[@"failed"] boolValue];
+  NSString *how = cached ? @"from the cache" : failed ? @"failed after you allowed it" : @"after you allowed it";
+  NSMutableArray *parts = [NSMutableArray array];
+  if (names.count) {
+    [parts addObject:[names componentsJoinedByString:@", "]];
+  }
+  if (search.length && str(use, @"summary").length) {
+    [parts addObject:str(use, @"summary")];
+  }
+  [parts addObject:how];
+  NSString *which = [@"\n" stringByAppendingString:[parts componentsJoinedByString:@" · "]];
   [t appendAttributedString:[[NSAttributedString alloc] initWithString:which attributes:secondary(11)]];
   NSMenuItem *m = [[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];
   m.attributedTitle = t;
   m.enabled = YES;  // readable, not greyed; with no action a click just closes the menu
+  NSArray *told = list(use, @"told");
+  if (told.count) {
+    NSMenu *sub = [NSMenu new];
+    sub.autoenablesItems = NO;
+    [sub addItem:heading(search.length ? @"What went back" : @"What its error said")];
+    for (id line in told) {
+      if ([line isKindOfClass:[NSString class]]) {
+        [sub addItem:note(line)];
+      }
+    }
+    m.submenu = sub;
+  }
   return m;
 }
 
@@ -297,9 +321,12 @@ static void apply(NSDictionary *v) {
   heldCount = held.count;
   alertCount = alerts.count;
   rebuild(held, list(v, @"uses"), alerts, str(v, @"version"));
-  item.visible = heldCount > 0 || alertCount > 0;
+  // Names that went back with nothing held, as from a search, keep the icon
+  // for a while, so what went back can be looked at.
+  BOOL recent = [v[@"recent"] isKindOfClass:[NSNumber class]] && [v[@"recent"] boolValue];
+  item.visible = heldCount > 0 || alertCount > 0 || recent;
   BOOL isRead = [v[@"read"] isKindOfClass:[NSNumber class]] && [v[@"read"] boolValue];
-  if (isRead && heldCount > 0) {
+  if (isRead && (heldCount > 0 || recent)) {
     showRead();
   } else {
     showIcon(dotTimer != nil);

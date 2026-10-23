@@ -6,12 +6,17 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/cdmckay/credlock/internal/proto"
 )
 
 // Provider fetches secrets.
 type Provider interface {
 	// ResolveAll fetches every reference in one go, or fails as a whole.
 	ResolveAll(ctx context.Context, account string, refs []string) (map[string]string, error)
+	// Search names the items in account whose titles contain term, and their
+	// fields. It never reads out a value.
+	Search(ctx context.Context, account, term string) (proto.Found, error)
 }
 
 // Supported reports whether some provider handles ref.

@@ -32,3 +32,27 @@ func TestTheHelpCarriesWhatAnAgentNeeds(t *testing.T) {
 		t.Error("the overview does not include the run help")
 	}
 }
+
+// An agent that doesn't know a reference reaches for 'op item list' unless
+// the help says where else to look.
+func TestTheHelpSaysHowToFindAReference(t *testing.T) {
+	flat := strings.Join(strings.Fields(searchHelp), " ")
+	for _, want := range []string{
+		"credlock search --account my --reason", // a worked example
+		"--reason TEXT Required",
+		"Never a value",
+		"Every search asks again",
+		"77 if the person denied it",
+		"not from a machine that asks a hub",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("search help lost %q", want)
+		}
+	}
+	if run := strings.Join(strings.Fields(runHelp), " "); !strings.Contains(run, "use credlock search") || !strings.Contains(run, "no need for 'op item list'") {
+		t.Error("the run help no longer points to credlock search")
+	}
+	if !strings.Contains(overview, searchHelp) {
+		t.Error("the overview does not include the search help")
+	}
+}

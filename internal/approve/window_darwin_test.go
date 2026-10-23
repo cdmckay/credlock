@@ -59,7 +59,15 @@ func snapshots(dir string) error {
 	pairing.Command = []string{"credlock", "pair", "potato"}
 	ttl := one
 	ttl.Window, ttl.Cap = 15*time.Minute, 15*time.Minute // credlock run --ttl 15m
-	for name, r := range map[string]Request{"one": one, "two": sample, "many": long, "remote": remote, "pairing": pairing, "ttl": ttl} {
+	search := one
+	search.Secrets, search.Command = nil, nil
+	search.Reason = "listing my open pull requests needs a GitHub token"
+	search.Search = "github"
+	longSearch := search
+	longSearch.Reason = long.Reason
+	longSearch.Search = strings.TrimSpace(strings.Repeat("metrics collector deploy key ", 4))[:proto.MaxSearch]
+	for name, r := range map[string]Request{"one": one, "two": sample, "many": long, "remote": remote, "pairing": pairing, "ttl": ttl,
+		"search": search, "search-long": longSearch} {
 		for _, dark := range []bool{false, true} {
 			mode := "light"
 			if dark {
