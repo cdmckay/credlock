@@ -55,10 +55,15 @@ func (s *Server) search(ctx context.Context, req proto.Request, from asker) prot
 	s.mu.Lock()
 	now := s.Now()
 	s.lastUsed = now
+	// Only the term: a search hands no secret to any command, whatever else
+	// the request carries.
+	use := menubar.Use{Search: approve.Clean(req.Search, proto.MaxSearch)}
 	if err != nil {
-		s.logTold(req, from.origin, menubar.Use{Failed: true, Summary: "the search failed"}, []string{err.Error()}, now)
+		use.Failed, use.Summary = true, "the search failed"
+		s.logTold(req, from.origin, use, []string{err.Error()}, now)
 	} else {
-		s.logTold(req, from.origin, menubar.Use{Summary: summary(found)}, told(found), now)
+		use.Summary = summary(found)
+		s.logTold(req, from.origin, use, told(found), now)
 	}
 	s.mu.Unlock()
 	s.notify(true)
@@ -70,19 +75,14 @@ func (s *Server) search(ctx context.Context, req proto.Request, from asker) prot
 
 // logTold records in the access log what went back for a search, or for a
 // request that failed after Allow, by name: use with its Told lines filled in
-// from lines. The caller holds s.mu.
+// from lines. What it was (a search's term, or a request's command and
+// secret names) is the caller's to fill in, so a request can't pass for the
+// other kind. The caller holds s.mu.
 func (s *Server) logTold(req proto.Request, origin string, use menubar.Use, lines []string, now time.Time) {
 	s.labels[req.Account] = firstNonEmpty(req.AccountLabel, req.Account)
 	use.At = now.Format("15:04")
-	use.Command = approve.CommandLine(req.Command, 80)
 	use.Reason = approve.Clean(req.Reason, 120)
 	use.Origin = origin
-	if req.Search != "" {
-		use.Search = approve.Clean(req.Search, proto.MaxSearch)
-	}
-	for _, sec := range req.Secrets {
-		use.Names = append(use.Names, approve.Clean(sec.Name, 60))
-	}
 	for _, l := range lines {
 		for len(use.Told) < maxToldLines {
 			head, rest := wrap(approve.Clean(l, 4000), toldWidth)

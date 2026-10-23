@@ -374,8 +374,10 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, from asker) pro
 		if err != nil {
 			// Its error goes back, and may name things, such as a
 			// fieldNotFound's field names: log that too.
+			// Its command and secret names, never a search term.
+			use := menubar.Use{Failed: true, Summary: "failed", Command: approve.CommandLine(req.Command, 80), Names: secretNames(req.Secrets)}
 			s.mu.Lock()
-			s.logTold(req, origin, menubar.Use{Failed: true, Summary: "failed"}, []string{err.Error()}, s.Now())
+			s.logTold(req, origin, use, []string{err.Error()}, s.Now())
 			s.mu.Unlock()
 			s.notify(false)
 			return proto.Response{Error: err.Error()}
@@ -430,20 +432,14 @@ type asker struct {
 // caller holds s.mu.
 func (s *Server) logUse(req proto.Request, origin string, asked bool, now time.Time) {
 	s.labels[req.Account] = firstNonEmpty(req.AccountLabel, req.Account)
-	seen := map[string]bool{}
-	var names []string
 	for _, sec := range req.Secrets {
 		s.names[key{origin, req.Account, sec.Ref}] = sec.Name
-		if n := approve.Clean(sec.Name, 60); !seen[n] {
-			seen[n] = true
-			names = append(names, n)
-		}
 	}
 	use := menubar.Use{
 		At:      now.Format("15:04"),
 		Command: approve.CommandLine(req.Command, 80),
 		Reason:  approve.Clean(req.Reason, 120),
-		Names:   names,
+		Names:   secretNames(req.Secrets),
 		Cached:  !asked,
 		Origin:  origin,
 	}
@@ -451,6 +447,20 @@ func (s *Server) logUse(req proto.Request, origin string, asked bool, now time.T
 	if len(s.uses) > maxUses {
 		s.uses = s.uses[:maxUses]
 	}
+}
+
+// secretNames is how the access log names a request's secrets: by variable,
+// flattened and cut, each once.
+func secretNames(secrets []proto.Secret) []string {
+	seen := map[string]bool{}
+	var names []string
+	for _, sec := range secrets {
+		if n := approve.Clean(sec.Name, 60); !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	return names
 }
 
 // notify tells the menu bar what is held now. read means secrets were just

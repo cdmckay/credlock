@@ -100,6 +100,42 @@ func TestWhatAFailureAfterAllowSaidIsLogged(t *testing.T) {
 	}
 }
 
+// A requester writes its own request, so it can send fields its op doesn't
+// use. The access log must still say what the request was.
+func TestASearchIsLoggedWithNoCommandOrSecretNames(t *testing.T) {
+	bar := &fakeBar{}
+	h := newHarness(t, true, withBar(bar))
+	_, err := client.CallAt(h.sock, proto.Request{
+		Op: proto.OpSearch, Account: "acct", Reason: "looking", Cwd: "/work", Search: "github",
+		Command: []string{"make", "deploy"}, Secrets: []proto.Secret{sec("A", "op://v/a/f")},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if use := bar.last().Uses[0]; use.Search != "github" || use.Command != "" || len(use.Names) != 0 {
+		t.Fatalf("access log: %+v", use)
+	}
+}
+
+func TestAFailedRequestIsNeverLoggedAsASearch(t *testing.T) {
+	bar := &fakeBar{}
+	h := newHarness(t, true, withBar(bar))
+	h.provider.fail(errors.New("fieldNotFound: the item has no such field"))
+	_, err := client.CallAt(h.sock, proto.Request{
+		Op: proto.OpResolve, Account: "acct", Reason: "testing", Cwd: "/work", Search: "github",
+		Command: []string{"make", "deploy"}, Secrets: []proto.Secret{sec("A", "op://v/a/nope"), sec("A", "op://v/a/nope")},
+	}, false)
+	if err == nil {
+		t.Fatal("no error")
+	}
+	if d := h.approver.dialogs(); len(d) != 1 || d[0].Search != "" {
+		t.Fatalf("the window was shown a search: %+v", d)
+	}
+	if use := bar.last().Uses[0]; use.Search != "" || !use.Failed || use.Command != "make deploy" || strings.Join(use.Names, ",") != "A" {
+		t.Fatalf("access log: %+v", use)
+	}
+}
+
 func TestTheIconShowsForAnHourAfterASearch(t *testing.T) {
 	c, exited := &clock{now: t0}, make(chan struct{})
 	bar := &fakeBar{}
