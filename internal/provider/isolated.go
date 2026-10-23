@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/cdmckay/credlock/internal/proto"
 )
 
 // ResolverCommand is the hidden subcommand that resolves references for one
@@ -40,14 +42,18 @@ type Isolated struct {
 	children map[string]*childResolver
 }
 
+// resolveRequest asks a resolver for Refs, or, with Search set, for the items
+// whose titles contain it.
 type resolveRequest struct {
-	ID   uint64   `json:"id"`
-	Refs []string `json:"refs"`
+	ID     uint64   `json:"id"`
+	Refs   []string `json:"refs,omitempty"`
+	Search string   `json:"search,omitempty"`
 }
 
 type resolveResponse struct {
 	ID     uint64            `json:"id"`
 	Values map[string]string `json:"values,omitempty"`
+	Found  *proto.Found      `json:"found,omitempty"`
 	Error  string            `json:"error,omitempty"`
 }
 
@@ -63,12 +69,31 @@ type childResolver struct {
 
 // ResolveAll fetches refs from account through that account's resolver.
 func (p *Isolated) ResolveAll(ctx context.Context, account string, refs []string) (map[string]string, error) {
+	resp, err := p.ask(ctx, account, resolveRequest{Refs: refs})
+	return resp.Values, err
+}
+
+// Search searches account through that account's resolver.
+func (p *Isolated) Search(ctx context.Context, account, term string) (proto.Found, error) {
+	resp, err := p.ask(ctx, account, resolveRequest{Search: term})
+	if err != nil {
+		return proto.Found{}, err
+	}
+	if resp.Found == nil {
+		return proto.Found{}, fmt.Errorf("the resolver for account %s answered a search without its results", account)
+	}
+	return *resp.Found, nil
+}
+
+// ask sends req to account's resolver and waits, at most Timeout, for its
+// answer.
+func (p *Isolated) ask(ctx context.Context, account string, req resolveRequest) (resolveResponse, error) {
 	if account == "" {
-		return nil, errors.New("no 1Password account given: pass --account, or set CREDLOCK_ACCOUNT or OP_ACCOUNT")
+		return resolveResponse{}, errors.New("no 1Password account given: pass --account, or set CREDLOCK_ACCOUNT or OP_ACCOUNT")
 	}
 	r, err := p.child(account)
 	if err != nil {
-		return nil, err
+		return resolveResponse{}, err
 	}
 	timeout := p.Timeout
 	if timeout == 0 {
@@ -76,12 +101,12 @@ func (p *Isolated) ResolveAll(ctx context.Context, account string, refs []string
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	values, err := r.resolve(ctx, refs)
+	resp, err := r.call(ctx, req)
 	if err != nil && !errors.As(err, new(*remoteError)) {
 		// The child is gone, broken or stuck: replace it next time.
 		p.drop(r)
 	}
-	return values, err
+	return resp, err
 }
 
 func (p *Isolated) child(account string) (*childResolver, error) {
@@ -149,14 +174,15 @@ type remoteError struct{ msg string }
 
 func (e *remoteError) Error() string { return e.msg }
 
-func (r *childResolver) resolve(ctx context.Context, refs []string) (map[string]string, error) {
+func (r *childResolver) call(ctx context.Context, req resolveRequest) (resolveResponse, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.next++
 	id := r.next
-	line, err := json.Marshal(resolveRequest{ID: id, Refs: refs})
+	req.ID = id
+	line, err := json.Marshal(req)
 	if err != nil {
-		return nil, err
+		return resolveResponse{}, err
 	}
 
 	type result struct {
@@ -184,17 +210,17 @@ func (r *childResolver) resolve(ctx context.Context, refs []string) (map[string]
 
 	select {
 	case <-ctx.Done():
-		return nil, fmt.Errorf("1Password didn't answer for account %s in time: is the app locked, or waiting for you to approve credlock?", r.account)
+		return resolveResponse{}, fmt.Errorf("1Password didn't answer for account %s in time: is the app locked, or waiting for you to approve credlock?", r.account)
 	case res := <-done:
 		switch {
 		case res.err != nil:
-			return nil, fmt.Errorf("the resolver for account %s stopped: %w", r.account, res.err)
+			return resolveResponse{}, fmt.Errorf("the resolver for account %s stopped: %w", r.account, res.err)
 		case res.resp.ID != id:
-			return nil, fmt.Errorf("the resolver for account %s answered request %d, not %d", r.account, res.resp.ID, id)
+			return resolveResponse{}, fmt.Errorf("the resolver for account %s answered request %d, not %d", r.account, res.resp.ID, id)
 		case res.resp.Error != "":
-			return nil, &remoteError{res.resp.Error}
+			return resolveResponse{}, &remoteError{res.resp.Error}
 		}
-		return res.resp.Values, nil
+		return res.resp, nil
 	}
 }
 
@@ -224,8 +250,15 @@ func serveResolver(p Provider, account string, stdin io.Reader, stdout io.Writer
 			_ = enc.Encode(resolveResponse{Error: "bad request: " + err.Error()})
 			continue
 		}
-		values, err := p.ResolveAll(context.Background(), account, req.Refs)
-		resp := resolveResponse{ID: req.ID, Values: values}
+		resp := resolveResponse{ID: req.ID}
+		var err error
+		if req.Search != "" {
+			var found proto.Found
+			found, err = p.Search(context.Background(), account, req.Search)
+			resp.Found = &found
+		} else {
+			resp.Values, err = p.ResolveAll(context.Background(), account, req.Refs)
+		}
 		if err != nil {
 			resp = resolveResponse{ID: req.ID, Error: err.Error()}
 		}

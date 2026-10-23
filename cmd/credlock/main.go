@@ -49,6 +49,12 @@ func dispatch(cmd string, args []string) int {
 			return 0
 		}
 		return client.Run(args)
+	case "search":
+		if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+			fmt.Print(searchHelp)
+			return 0
+		}
+		return client.Search(args)
 	case "status":
 		return client.Status()
 	case "forget":
@@ -74,9 +80,12 @@ func dispatch(cmd string, args []string) int {
 	case provider.ResolverCommand:
 		return provider.ResolverMain(args, currentVersion(), os.Stdin, os.Stdout)
 	case "help", "-h", "--help":
-		if len(args) > 0 && args[0] == "run" {
+		switch {
+		case len(args) > 0 && args[0] == "run":
 			fmt.Print(runHelp)
-		} else {
+		case len(args) > 0 && args[0] == "search":
+			fmt.Print(searchHelp)
+		default:
 			fmt.Print(overview)
 		}
 		return 0

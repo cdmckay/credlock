@@ -14,6 +14,7 @@ const (
 	OpForget  = "forget" // drop this machine's approvals for Secrets' references
 	OpHub     = "hub"    // hub mode: Hub says what to do
 	OpPair    = "pair"   // over the tailnet: pair this machine user with the hub
+	OpSearch  = "search" // item titles in Account containing Search: names only, never values
 )
 
 // Hub mode actions, for OpHub.
@@ -51,6 +52,8 @@ type Request struct {
 	// approval lasts after its last use, so it only ever shortens one. Zero
 	// for no limit of its own.
 	TTL int64 `json:"ttl,omitempty"`
+	// Search is what OpSearch looks for in item titles.
+	Search string `json:"search,omitempty"`
 
 	// User is the user another machine says is asking. Its key is the one in
 	// its TLS certificate, and Nonce its part of a pairing code (see
@@ -109,4 +112,48 @@ type Response struct {
 	Paired bool     `json:"paired,omitempty"`
 	Hub    *HubInfo `json:"hub,omitempty"`
 	PID    int      `json:"pid,omitempty"`
+	// Found answers OpSearch.
+	Found *Found `json:"found,omitempty"`
+}
+
+// MaxFound is as many items as a search names. Past it, the answer counts
+// the rest, so the requester searches for something narrower rather than
+// missing them.
+const MaxFound = 20
+
+// MinSearch is the shortest term a search takes, in characters: a shorter one
+// would list nearly everything. MaxSearch is the longest, which the approval
+// window shows whole: a term cut for display would search for more than the
+// person saw.
+const (
+	MinSearch = 2
+	MaxSearch = 100
+)
+
+// Found is what a search found: names, references and field types, never a
+// value.
+type Found struct {
+	Items []FoundItem `json:"items,omitempty"` // best match first
+	// More counts the matches past the last of Items.
+	More int `json:"more,omitempty"`
+	// Unread names the vaults whose items couldn't be listed, and why, so an
+	// empty answer isn't taken for "no such item".
+	Unread []string `json:"unread,omitempty"`
+	// Closed counts the vaults the account can see but not read items in,
+	// as an owner of a 1Password Business account sees every vault. They
+	// aren't named: that would list the company's vaults for nothing.
+	Closed int `json:"closed,omitempty"`
+}
+
+// FoundItem is one item a search found.
+type FoundItem struct {
+	// Ref is op://VAULT/ITEM, ready for a field to be added, with a title
+	// where the title works in a reference and an ID where it doesn't.
+	Ref   string `json:"ref"`
+	Vault string `json:"vault"`
+	Title string `json:"title"`
+	// Fields names the item's fields, as a fieldNotFound hint does: each
+	// one's title, type and section. Why says why they couldn't be listed.
+	Fields string `json:"fields,omitempty"`
+	Why    string `json:"why,omitempty"`
 }

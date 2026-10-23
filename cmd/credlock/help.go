@@ -6,6 +6,8 @@ const overview = `credlock gives a command its secrets, after a person approves 
 
 Usage:
   credlock run --account ACCOUNT --reason TEXT [--ttl DURATION] [--] COMMAND [ARGS...]
+  credlock search --account ACCOUNT --reason TEXT TERM
+                         find an item's reference by its title (names only)
   credlock forget [--account ACCOUNT] [REF...]
                          forget approvals now, when you are done with them
   credlock status        what is approved right now, per account (never values)
@@ -16,10 +18,12 @@ Usage:
   credlock pair [--forget] MAC
                          on a machine without 1Password: pair with a Mac,
                          or forget its key after credlock was reinstalled there
-  credlock help [run]    this, or just the part about run
+  credlock help [run|search]
+                         this, or just the part about run or search
   credlock version
 
 ` + runHelp + `
+` + searchHelp + `
 Other machines
   A machine without 1Password asks a Mac on the tailnet instead: run
   'credlock hub on' on the Mac, then 'credlock pair MAC' on the machine, and
@@ -92,7 +96,9 @@ References
     1Password Business   SDK: "Private"   (the app and op show it as "Employee")
   When in doubt, use the vault's ID. A vaultNotFound error lists the vaults
   the account has, and a fieldNotFound error lists the item's fields (names
-  and types, never values), so there is no need for 'op item get'.
+  and types, never values). To find an item you don't know the reference
+  of, use credlock search, below. There is no need for 'op item list' or
+  'op item get'.
 
 Exit status
   COMMAND's own, once it runs.
@@ -111,4 +117,29 @@ Troubleshooting
                        1Password isn't running or unlocked, or its SDK
                        integration is off: Settings > Developer >
                        "Integrate with other apps".
+`
+
+// searchHelp is `credlock search --help`.
+const searchHelp = `credlock search
+  Finds the items whose titles contain TERM, ignoring case, for when you
+  don't know a reference. It asks the person first, in a window that shows
+  TERM and your reason, then prints up to 20 matching items, best match
+  first, each with its reference and its fields' names and types. Never a
+  value. Add a field to a reference it prints to use it with credlock run:
+
+    credlock search --account my --reason "listing my PRs needs a GitHub token" github
+    GITHUB_TOKEN='op://Personal/GitHub/token' credlock run --account my ...
+
+  Every search asks again: nothing is kept. More than 20 matches ends with
+  how many more; search for something narrower to see them. It works only
+  on the Mac with 1Password, not from a machine that asks a hub.
+
+  --reason TEXT      Required. What you are looking for, and why, in a few
+                     plain words. The person reads it before deciding.
+  --account ACCOUNT  As for credlock run.
+  TERM               Part of an item's title, 2 to 100 characters. Several
+                     words are searched for as one phrase.
+
+  Exit status: 0 once it searched, matches or not; 77 if the person denied
+  it, so don't retry; 1 if it couldn't search, and the message says why.
 `

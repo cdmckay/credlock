@@ -116,6 +116,9 @@ type Server struct {
 	names    map[key]string    // the variable each secret was last delivered as
 	labels   map[string]string // how to show each account
 	uses     []menubar.Use     // the access log, newest first
+	// told is when names last went back without anything held: a search,
+	// or a request that failed after Allow. The icon shows for an hour after.
+	told time.Time
 
 	asking sync.Mutex // one approval at a time, so one request can't hide behind another
 }
@@ -265,6 +268,11 @@ func (s *Server) handle(conn *net.UnixConn) {
 		defer cancel()
 		go watchHangup(conn, cancel)
 		reply(conn, s.resolve(ctx, req, asker{requester: fmt.Sprintf("this Mac: %s (pid %d)", peer.Name, peer.PID)}))
+	case proto.OpSearch:
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go watchHangup(conn, cancel)
+		reply(conn, s.search(ctx, req, asker{requester: fmt.Sprintf("this Mac: %s (pid %d)", peer.Name, peer.PID)}))
 	case proto.OpHub:
 		reply(conn, s.hubOp(req))
 	case proto.OpStatus:
@@ -364,6 +372,14 @@ func (s *Server) resolve(ctx context.Context, req proto.Request, from asker) pro
 		// halfway through.
 		fetched, err := s.Provider.ResolveAll(context.WithoutCancel(ctx), req.Account, refs)
 		if err != nil {
+			// Its error goes back, and may name things, such as a
+			// fieldNotFound's field names: log that too.
+			// Its command and secret names, never a search term.
+			use := menubar.Use{Failed: true, Summary: "failed", Command: approve.CommandLine(req.Command, 80), Names: secretNames(req.Secrets)}
+			s.mu.Lock()
+			s.logTold(req, origin, use, []string{err.Error()}, s.Now())
+			s.mu.Unlock()
+			s.notify(false)
 			return proto.Response{Error: err.Error()}
 		}
 		s.mu.Lock()
@@ -416,20 +432,14 @@ type asker struct {
 // caller holds s.mu.
 func (s *Server) logUse(req proto.Request, origin string, asked bool, now time.Time) {
 	s.labels[req.Account] = firstNonEmpty(req.AccountLabel, req.Account)
-	seen := map[string]bool{}
-	var names []string
 	for _, sec := range req.Secrets {
 		s.names[key{origin, req.Account, sec.Ref}] = sec.Name
-		if n := approve.Clean(sec.Name, 60); !seen[n] {
-			seen[n] = true
-			names = append(names, n)
-		}
 	}
 	use := menubar.Use{
 		At:      now.Format("15:04"),
 		Command: approve.CommandLine(req.Command, 80),
 		Reason:  approve.Clean(req.Reason, 120),
-		Names:   names,
+		Names:   secretNames(req.Secrets),
 		Cached:  !asked,
 		Origin:  origin,
 	}
@@ -437,6 +447,20 @@ func (s *Server) logUse(req proto.Request, origin string, asked bool, now time.T
 	if len(s.uses) > maxUses {
 		s.uses = s.uses[:maxUses]
 	}
+}
+
+// secretNames is how the access log names a request's secrets: by variable,
+// flattened and cut, each once.
+func secretNames(secrets []proto.Secret) []string {
+	seen := map[string]bool{}
+	var names []string
+	for _, sec := range secrets {
+		if n := approve.Clean(sec.Name, 60); !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	return names
 }
 
 // notify tells the menu bar what is held now. read means secrets were just
@@ -447,7 +471,8 @@ func (s *Server) notify(read bool) {
 	}
 	s.mu.Lock()
 	now := s.Now()
-	snap := menubar.Snapshot{Read: read, Uses: append([]menubar.Use(nil), s.uses...), Alerts: append([]menubar.Alert(nil), s.alerts...), Version: s.Version}
+	snap := menubar.Snapshot{Read: read, Uses: append([]menubar.Use(nil), s.uses...), Alerts: append([]menubar.Alert(nil), s.alerts...), Version: s.Version,
+		Recent: !s.told.IsZero() && now.Sub(s.told) < Window}
 	for _, e := range s.cache.list(now) {
 		k := key{e.Origin, e.Account, e.Ref}
 		snap.Held = append(snap.Held, menubar.Held{

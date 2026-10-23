@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cdmckay/credlock/internal/proto"
 )
 
 // echoProvider answers each reference with "ACCOUNT:REF", so a test can tell
@@ -25,6 +27,14 @@ func (p echoProvider) ResolveAll(_ context.Context, account string, refs []strin
 		out[r] = account + ":" + r
 	}
 	return out, nil
+}
+
+// Search finds one item, named for the account and the term.
+func (p echoProvider) Search(_ context.Context, account, term string) (proto.Found, error) {
+	if p.fail != "" {
+		return proto.Found{}, errors.New(p.fail)
+	}
+	return proto.Found{Items: []proto.FoundItem{{Ref: "op://" + account + "/" + term, Fields: `"credential" (Concealed)`}}, More: 2}, nil
 }
 
 // TestFakeResolverProcess is the fake resolver, not a test: it only acts when
@@ -95,6 +105,23 @@ func TestEachAccountIsAnsweredByItsOwnResolver(t *testing.T) {
 	}
 	if got := strings.Join(s.all(), ","); got != "personal,work" {
 		t.Fatalf("resolvers started for %s, want one each for personal and work", got)
+	}
+}
+
+func TestASearchIsAnsweredByTheAccountsResolver(t *testing.T) {
+	p, s := fakeResolvers(always("echo"))
+	if _, err := p.ResolveAll(context.Background(), "work", []string{"op://v/a/f"}); err != nil {
+		t.Fatal(err)
+	}
+	found, err := p.Search(context.Background(), "work", "github")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Items) != 1 || found.Items[0].Ref != "op://work/github" || found.More != 2 {
+		t.Fatalf("got %+v", found)
+	}
+	if got := strings.Join(s.all(), ","); got != "work" {
+		t.Fatalf("resolvers started for %s, want the one for work, reused", got)
 	}
 }
 

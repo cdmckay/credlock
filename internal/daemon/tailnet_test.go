@@ -438,6 +438,10 @@ func (p *recordAccount) ResolveAll(_ context.Context, account string, refs []str
 	return out, nil
 }
 
+func (p *recordAccount) Search(context.Context, string, string) (proto.Found, error) {
+	return proto.Found{}, errors.New("a hub doesn't search for other machines")
+}
+
 func (p *recordAccount) got() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -446,8 +450,9 @@ func (p *recordAccount) got() string {
 
 func TestOnlyPairingAndResolvingAreServedOverTheTailnet(t *testing.T) {
 	r := newRemote(t, "papaya", true)
-	for _, op := range []string{proto.OpStatus, proto.OpClear, proto.OpStop, proto.OpForget, proto.OpHub} {
-		if resp, _ := r.ask(newKey(t), "me", proto.Request{Op: op}); !strings.Contains(resp.Error, "only pairs and resolves") {
+	for _, op := range []string{proto.OpStatus, proto.OpClear, proto.OpStop, proto.OpForget, proto.OpHub, proto.OpSearch} {
+		req := proto.Request{Op: op, Account: "acct", Reason: "looking", Search: "github"}
+		if resp, _ := r.ask(newKey(t), "me", req); !strings.Contains(resp.Error, "only pairs and resolves") {
 			t.Errorf("%s: %+v", op, resp)
 		}
 	}

@@ -410,9 +410,12 @@ static CLPanel *makePanel(NSView *root);
 
 static CLWindow *build(NSDictionary *v, int timeout) {
   CLWindow *w = [CLWindow new];
+  // A search asks for no secret: teal, with the term where the secrets go.
+  BOOL searching = [str(v, @"kind") isEqualToString:@"search"];
 
   // Who is asking.
-  NSImageView *shield = symbol(@"lock.shield.fill", 30, NSColor.systemGreenColor);
+  NSImageView *shield = searching ? symbol(@"magnifyingglass.circle.fill", 30, NSColor.systemTealColor)
+                                  : symbol(@"lock.shield.fill", 30, NSColor.systemGreenColor);
   NSView *header = hstack(@[
     shield,
     vstack(@[
@@ -479,8 +482,13 @@ static CLWindow *build(NSDictionary *v, int timeout) {
   CGFloat half = (kInner - kColumnGap) / 2;
   NSFont *code = mono(12, NSFontWeightRegular);
   NSFont *plain = sys(12.5, NSFontWeightRegular);
-  NSView *details = vstack(@[
-    detail(@"terminal", @"Command", str(v, @"command"), code, kInner),
+  NSMutableArray *detailRows = [NSMutableArray array];
+  // A search has no command to hand secrets to: its answer goes back to the
+  // requester itself.
+  if (!searching) {
+    [detailRows addObject:detail(@"terminal", @"Command", str(v, @"command"), code, kInner)];
+  }
+  [detailRows addObjectsFromArray:@[
     hstack(@[
       detail(@"folder", @"Directory", str(v, @"directory"), code, half),
       detail(@"cpu", @"Requested by", str(v, @"requester"), code, half),
@@ -491,8 +499,8 @@ static CLWindow *build(NSDictionary *v, int timeout) {
       detail(@"clock", @"Approval lasts", str(v, @"lifetime"), plain, half),
     ],
            kColumnGap, NSLayoutAttributeTop),
-  ],
-                           18);
+  ]];
+  NSView *details = vstack(detailRows, 18);
 
   // Which secrets.
   NSArray *list = [v[@"secrets"] isKindOfClass:[NSArray class]] ? v[@"secrets"] : @[];
@@ -533,6 +541,15 @@ static CLWindow *build(NSDictionary *v, int timeout) {
   }
   // A pairing on its own has no secrets: no card for them.
   NSView *secrets = list.count ? card(NSColor.systemGreenColor, vstack(secretsParts, 16)) : nil;
+  if (searching) {
+    // The term, large, and what a search sends back.
+    secrets = card(NSColor.systemTealColor, vstack(@[
+                     text(@"Searching item titles for", sys(13, NSFontWeightSemibold), NSColor.systemTealColor, kCardInner),
+                     text(str(v, @"search"), mono(17, NSFontWeightSemibold), NSColor.labelColor, kCardInner),
+                     text(str(v, @"search_note"), sys(12, NSFontWeightRegular), NSColor.secondaryLabelColor, kCardInner),
+                   ],
+                                                   10));
+  }
 
   // The answer.
   CGFloat buttonWidth = (kInner - 16) / 2;

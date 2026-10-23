@@ -21,6 +21,7 @@ type fakeClient struct {
 	vaults    []named
 	vaultsErr error
 	items     map[string][]named          // by vault ID
+	itemsErr  map[string]error            // by vault ID: Items fails with it
 	item      map[string]onepassword.Item // by "vault ID/item ID"
 	stuck     chan struct{}               // when set, Item waits for it to close
 	calls     int
@@ -36,6 +37,9 @@ func (c *fakeClient) Vaults(context.Context) ([]named, error) {
 
 func (c *fakeClient) Items(_ context.Context, vaultID string) ([]named, error) {
 	c.listed++
+	if err := c.itemsErr[vaultID]; err != nil {
+		return nil, err
+	}
 	items, ok := c.items[vaultID]
 	if !ok {
 		return nil, errors.New("no such vault")
@@ -230,6 +234,7 @@ func spotify(answer func(string) response) *fakeClient {
 		vaults: []named{{"vaultid1", "Personal"}, {"vaultid2", "Shared"}},
 		items: map[string][]named{
 			"vaultid1": {{"itemid1", "Spotify"}, {"itemid2", "Other"}},
+			"vaultid2": {},
 		},
 		item: map[string]onepassword.Item{"vaultid1/itemid1": {
 			Title: "Spotify " + leaked,

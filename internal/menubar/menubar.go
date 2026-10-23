@@ -33,7 +33,14 @@ type Snapshot struct {
 	// Version is the running helper's, shown at the foot of the menu: the
 	// one serving requests, even after an upgrade on disk.
 	Version string `json:"version,omitempty"`
+	// Recent means names went back within the hour, by a search or a
+	// request that failed after Allow, which leave nothing held: the icon
+	// shows anyway, so what went back can be looked at.
+	Recent bool `json:"recent,omitempty"`
 }
+
+// shows says whether the icon is visible with this snapshot.
+func (s Snapshot) shows() bool { return len(s.Held) > 0 || len(s.Alerts) > 0 || s.Recent }
 
 // Alert is one thing to look at.
 type Alert struct {
@@ -51,7 +58,8 @@ type Held struct {
 	Left      string `json:"left"` // e.g. "48 min left"
 }
 
-// Use is one delivery of secrets to a command.
+// Use is one delivery of secrets to a command, one search, or one request
+// that failed after Allow.
 type Use struct {
 	At      string   `json:"at"` // e.g. "14:02"
 	Command string   `json:"command"`
@@ -61,6 +69,15 @@ type Use struct {
 	Cached bool `json:"cached"`
 	// Origin is the tailnet host that asked; empty for this machine.
 	Origin string `json:"origin,omitempty"`
+	// Search is the term, for a search.
+	Search string `json:"search,omitempty"`
+	// Failed means the request failed after Allow, so no secret went back.
+	Failed bool `json:"failed,omitempty"`
+	// Summary sums up what went back for a search or a failure, such as
+	// "2 items". Told is all of it, one line each, by name: what the search
+	// found, or what the error said. Never a value.
+	Summary string   `json:"summary,omitempty"`
+	Told    []string `json:"told,omitempty"`
 }
 
 // Action is something done from the menu.
@@ -105,7 +122,7 @@ func (b *Bar) Notify(s Snapshot) {
 	}
 	b.pending = &s
 	if b.wake == nil {
-		if len(s.Held) == 0 && len(s.Alerts) == 0 {
+		if !s.shows() {
 			// Nothing to show yet: don't start an icon just to hide it.
 			b.pending = nil
 			b.mu.Unlock()
@@ -140,7 +157,7 @@ func (b *Bar) run() {
 		// hasn't been noticed yet: the send fails, and a new one gets it.
 		for range 2 {
 			if c == nil || c.dead() {
-				if len(s.Held) == 0 && len(s.Alerts) == 0 {
+				if !s.shows() {
 					break // nothing to show: don't start one just to hide it
 				}
 				var err error

@@ -104,6 +104,19 @@ func TestNothingStartsUntilASecretIsHeld(t *testing.T) {
 	}
 }
 
+func TestARecentSearchShowsTheIconWithNothingHeld(t *testing.T) {
+	b, r, log := fakeBar(t, "record")
+	b.Notify(Snapshot{Recent: true, Read: true, Uses: []Use{{At: "14:02", Search: "github", Summary: "1 item", Told: []string{`op://Shared/GitHub: "token" (Concealed)`}}}})
+	if !eventually(func() bool {
+		return len(lines(log)) == 1 && strings.Contains(lines(log)[0], `"told":["op://Shared/GitHub`)
+	}) {
+		t.Fatalf("the icon never got the search: %q", lines(log))
+	}
+	if _, starts := r.got(); starts != 1 {
+		t.Fatalf("%d icons started", starts)
+	}
+}
+
 func TestTheIconGetsSnapshotsAndItsActionsComeBack(t *testing.T) {
 	b, r, log := fakeBar(t, "act")
 	b.Notify(holding)
