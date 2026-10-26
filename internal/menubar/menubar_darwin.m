@@ -7,7 +7,7 @@
 #include "menubar_darwin.h"
 
 static const NSTimeInterval kDotSeconds = 4;  // how long the dot stays after the last read
-static const NSUInteger kLogItems = 20;       // uses shown in the menu
+static const NSUInteger kLogItems = 5;        // uses shown in the menu; the rest are under Earlier
 
 static NSStatusItem *item;
 static NSMenu *menu;
@@ -165,25 +165,24 @@ static NSMenuItem *note(NSString *title) {
   return m;
 }
 
-// logEntry is one use: when and what, then why, then which secrets. A search,
-// or a request that failed after Allow, also has what went back, by name, in
-// a submenu.
+// logEntry is one use, in two lines: when, and what it was for in the
+// requester's words; then which secrets, or what was searched for, and
+// whether you were asked. The command, and for a search or a request that
+// failed after Allow what went back, by name, are in a submenu.
 static NSMenuItem *logEntry(NSDictionary *use) {
-  NSMutableAttributedString *t = [NSMutableAttributedString new];
-  // Another machine's use says which: "14:02  papaya · in-api.sh".
-  NSString *origin = str(use, @"origin");
   NSString *search = str(use, @"search");
-  NSString *what = search.length ? [NSString stringWithFormat:@"search “%@”", search] : str(use, @"command");
-  NSString *when = origin.length ? [NSString stringWithFormat:@"%@  %@ · %@", str(use, @"at"), origin, what]
-                                 : [NSString stringWithFormat:@"%@  %@", str(use, @"at"), what];
-  [t appendAttributedString:[[NSAttributedString alloc]
-                                initWithString:when
-                                    attributes:@{NSFontAttributeName : [NSFont menuFontOfSize:13]}]];
+  NSString *command = str(use, @"command");
+  // With no reason given, what ran stands in for it.
   NSString *reason = str(use, @"reason");
-  if (reason.length) {
-    [t appendAttributedString:[[NSAttributedString alloc] initWithString:[@"\n" stringByAppendingString:reason]
-                                                              attributes:secondary(12)]];
-  }
+  NSString *what = reason.length ? reason : search.length ? [NSString stringWithFormat:@"Search “%@”", search] : command;
+  NSMutableAttributedString *t = [[NSMutableAttributedString alloc]
+      initWithString:[str(use, @"at") stringByAppendingString:@"  "]
+          attributes:@{NSFontAttributeName : [NSFont monospacedDigitSystemFontOfSize:13 weight:NSFontWeightRegular],
+                       NSForegroundColorAttributeName : NSColor.secondaryLabelColor}];
+  [t appendAttributedString:[[NSAttributedString alloc]
+                                initWithString:what
+                                    attributes:@{NSFontAttributeName : [NSFont menuFontOfSize:13]}]];
+
   NSMutableArray *names = [NSMutableArray array];
   for (id n in list(use, @"names")) {
     if ([n isKindOfClass:[NSString class]]) {
@@ -192,33 +191,70 @@ static NSMenuItem *logEntry(NSDictionary *use) {
   }
   BOOL cached = [use[@"cached"] isKindOfClass:[NSNumber class]] && [use[@"cached"] boolValue];
   BOOL failed = [use[@"failed"] isKindOfClass:[NSNumber class]] && [use[@"failed"] boolValue];
-  NSString *how = cached ? @"from the cache" : failed ? @"failed after you allowed it" : @"after you allowed it";
+  // Another machine's use says which: "papaya · IN_TOKEN · you allowed it".
   NSMutableArray *parts = [NSMutableArray array];
-  if (names.count) {
+  if (str(use, @"origin").length) {
+    [parts addObject:str(use, @"origin")];
+  }
+  if (search.length) {
+    [parts addObject:[NSString stringWithFormat:@"search “%@”", search]];
+    if (!failed && str(use, @"summary").length) {
+      [parts addObject:str(use, @"summary")];
+    }
+  } else if (names.count) {
     [parts addObject:[names componentsJoinedByString:@", "]];
+  } else if (command.length) {
+    [parts addObject:command];  // what happened, such as "paired with this Mac"
   }
-  if (search.length && str(use, @"summary").length) {
-    [parts addObject:str(use, @"summary")];
-  }
-  [parts addObject:how];
-  NSString *which = [@"\n" stringByAppendingString:[parts componentsJoinedByString:@" · "]];
-  [t appendAttributedString:[[NSAttributedString alloc] initWithString:which attributes:secondary(11)]];
+  [parts addObject:cached ? @"allowed earlier" : failed ? @"failed after you allowed it" : @"you allowed it"];
+  [t appendAttributedString:[[NSAttributedString alloc]
+                                initWithString:[@"\n" stringByAppendingString:[parts componentsJoinedByString:@" · "]]
+                                    attributes:secondary(12)]];
   NSMenuItem *m = [[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];
   m.attributedTitle = t;
   m.enabled = YES;  // readable, not greyed; with no action a click just closes the menu
+
+  NSMenu *sub = [NSMenu new];
+  sub.autoenablesItems = NO;
+  if (names.count && command.length) {
+    [sub addItem:heading(@"Command")];
+    [sub addItem:note(command)];
+  }
   NSArray *told = list(use, @"told");
   if (told.count) {
-    NSMenu *sub = [NSMenu new];
-    sub.autoenablesItems = NO;
     [sub addItem:heading(search.length ? @"What went back" : @"What its error said")];
     for (id line in told) {
       if ([line isKindOfClass:[NSString class]]) {
         [sub addItem:note(line)];
       }
     }
+  }
+  if (sub.numberOfItems) {
     m.submenu = sub;
   }
   return m;
+}
+
+// logItems is the access log as the menu shows it: the latest uses, then
+// the rest in a submenu, so the menu stays short and nothing kept is hidden.
+static NSArray *logItems(NSArray *uses) {
+  NSMutableArray *items = [NSMutableArray array];
+  NSMenu *earlier = [NSMenu new];
+  earlier.autoenablesItems = NO;
+  for (id use in uses) {
+    if (items.count < kLogItems) {
+      [items addObject:logEntry(use)];
+    } else {
+      [earlier addItem:logEntry(use)];
+    }
+  }
+  if (earlier.numberOfItems) {
+    NSString *title = [NSString stringWithFormat:@"%ld earlier", (long)earlier.numberOfItems];
+    NSMenuItem *m = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+    m.submenu = earlier;
+    [items addObject:m];
+  }
+  return items;
 }
 
 // heldEntry is one secret: its name and time left, with its reference and a
@@ -283,12 +319,8 @@ static void rebuild(NSArray *held, NSArray *uses, NSArray *alerts, NSString *ver
   if (uses.count == 0) {
     [menu addItem:note(@"Nothing read yet")];
   }
-  NSUInteger shown = 0;
-  for (id use in uses) {
-    if (shown++ == kLogItems) {
-      break;
-    }
-    [menu addItem:logEntry(use)];
+  for (NSMenuItem *m in logItems(uses)) {
+    [menu addItem:m];
   }
 
   [menu addItem:[NSMenuItem separatorItem]];
@@ -395,6 +427,73 @@ int credlock_menubar_icon_snapshot(const char *path, int dark) {
         [img drawInRect:NSMakeRect(x, 3, img.size.width, img.size.height)];
         // About the gap AppKit leaves when the image hugs the title.
         [@"4" drawAtPoint:NSMakePoint(x + img.size.width + 3, 4) withAttributes:font];
+      }
+      [NSGraphicsContext restoreGraphicsState];
+      png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    }];
+    return png && [png writeToFile:[NSString stringWithUTF8String:path] atomically:YES] ? 0 : -1;
+  }
+}
+
+// The menu itself can only be drawn on screen, so the log's snapshot draws
+// each row's title as logItems makes it, with the chevron of one that has a
+// submenu, on a menu coloured panel.
+int credlock_menubar_log_snapshot(const char *json, const char *path, int dark) {
+  @autoreleasepool {
+    [NSApplication sharedApplication];
+    id v = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:json length:strlen(json)] options:0 error:nil];
+    NSArray *rows = logItems(list(v, @"uses"));
+    NSAppearance *look = [NSAppearance appearanceNamed:dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
+    __block NSData *png = nil;
+    [look performAsCurrentDrawingAppearance:^{
+      const CGFloat pad = 14, gap = 8, chevron = 24, scale = 2;
+      NSMutableArray *titles = [NSMutableArray array];
+      CGFloat width = 0, height = pad;
+      for (NSMenuItem *m in rows) {
+        // The menu draws a title with no colour of its own in its text colour.
+        NSMutableAttributedString *t =
+            m.attributedTitle ? [m.attributedTitle mutableCopy]
+                              : [[NSMutableAttributedString alloc]
+                                    initWithString:m.title
+                                        attributes:@{NSFontAttributeName : [NSFont menuFontOfSize:0]}];
+        [t enumerateAttribute:NSForegroundColorAttributeName
+                      inRange:NSMakeRange(0, t.length)
+                      options:0
+                   usingBlock:^(id color, NSRange r, BOOL *stop) {
+                     if (!color) {
+                       [t addAttribute:NSForegroundColorAttributeName value:NSColor.labelColor range:r];
+                     }
+                   }];
+        [titles addObject:t];
+        width = MAX(width, t.size.width);
+        height += t.size.height + gap;
+      }
+      NSSize panel = NSMakeSize(ceil(pad + width + chevron + pad), ceil(height - gap + pad));
+      NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
+                                                                      pixelsWide:(NSInteger)(panel.width * scale)
+                                                                      pixelsHigh:(NSInteger)(panel.height * scale)
+                                                                   bitsPerSample:8
+                                                                 samplesPerPixel:4
+                                                                        hasAlpha:YES
+                                                                        isPlanar:NO
+                                                                  colorSpaceName:NSCalibratedRGBColorSpace
+                                                                     bytesPerRow:0
+                                                                    bitsPerPixel:0];
+      rep.size = panel;
+      [NSGraphicsContext saveGraphicsState];
+      [NSGraphicsContext setCurrentContext:[NSGraphicsContext graphicsContextWithBitmapImageRep:rep]];
+      [[NSColor colorWithWhite:dark ? 0.16 : 0.96 alpha:1] setFill];
+      NSRectFill(NSMakeRect(0, 0, panel.width, panel.height));
+      NSImage *arrow = [NSImage imageWithSystemSymbolName:@"chevron.right" accessibilityDescription:nil];
+      CGFloat top = panel.height - pad;
+      for (NSUInteger i = 0; i < titles.count; i++) {
+        NSAttributedString *t = titles[i];
+        NSRect at = NSMakeRect(pad, top - t.size.height, width, t.size.height);
+        [t drawInRect:at];
+        if (((NSMenuItem *)rows[i]).submenu) {
+          drawTinted(arrow, NSColor.secondaryLabelColor, NSMakeRect(NSMaxX(at), NSMinY(at), chevron, at.size.height));
+        }
+        top -= t.size.height + gap;
       }
       [NSGraphicsContext restoreGraphicsState];
       png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];

@@ -75,6 +75,26 @@ func iconSnapshot(path string, dark bool) error {
 	return nil
 }
 
+// logSnapshot renders the access log of s to a PNG at path, for checking it
+// by eye. It must run on the main thread.
+func logSnapshot(s Snapshot, path string, dark bool) error {
+	data, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	js, p := C.CString(string(data)), C.CString(path)
+	defer C.free(unsafe.Pointer(js))
+	defer C.free(unsafe.Pointer(p))
+	d := C.int(0)
+	if dark {
+		d = 1
+	}
+	if C.credlock_menubar_log_snapshot(js, p, d) != 0 {
+		return os.ErrInvalid
+	}
+	return nil
+}
+
 //export credlockMenubarAction
 func credlockMenubarAction(js *C.char) {
 	var a Action

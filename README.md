@@ -175,10 +175,13 @@ How it's kept safe:
   gets an orange dot for a few seconds whenever secrets are read, cached or
   not. Its menu is the access log, the held secrets with the time each has
   left, and Forget and Stop. It runs as another child of the helper, and is
-  sent names, references and times, never values. A search, or a request
-  that failed after you allowed it, is logged with what went back by name, in
-  a submenu: the items a search found and their field names, or what the
-  error said. The key stays for an hour after one, even with nothing held.
+  sent names, references and times, never values. The log shows the last
+  five uses, each as what it was for, in the requester's words, then which
+  secrets it used and whether you were asked, and up to 25 before them
+  under Earlier. A use's command is in its submenu, and so is what went
+  back, by name, for a search or a request that failed after you allowed
+  it: the items a search found and their field names, or what the error
+  said. The key stays for an hour after one, even with nothing held.
 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/menubar-icon-dark.png">
@@ -215,7 +218,8 @@ mode 0700 and refuses to use if anyone else owns it.
 - Allowing a search tells the requester the titles, references and field
   names of up to 20 items whose titles contain its term, and how many more
   match. The window shows the term and says this, but not which items will
-  match: you see those only afterwards, in the access log. A short, common
+  match: you see those only afterwards, in the access log, and only while
+  the search is among its last 30 uses. A short, common
   term such as `ap` can match much of an account. The window shows it, but
   credlock refuses only terms under two characters.
 - **Hub mode needs Tailscale** on every machine involved, in one tailnet.

@@ -370,7 +370,7 @@ func (s *Server) pairOnly(ctx context.Context, req proto.Request, from asker) (r
 		return proto.Response{Error: "pairing: " + err.Error()}
 	}
 	s.mu.Lock()
-	s.uses = append([]menubar.Use{{At: s.Now().Format("15:04"), Command: "paired with this Mac", Reason: approve.Clean(req.Reason, 120), Origin: from.origin}}, s.uses...)
+	s.uses = append([]menubar.Use{{At: s.Now().Format("15:04"), Command: "paired with this Mac", Reason: approve.Clean(req.Reason, logReason), Origin: from.origin}}, s.uses...)
 	if len(s.uses) > maxUses {
 		s.uses = s.uses[:maxUses]
 	}
