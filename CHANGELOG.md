@@ -7,6 +7,15 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Changed
+
+- The access log in the menu bar shows the last five uses instead of twenty,
+  in two lines each: when and what it was for, then which secrets it used
+  (or what was searched for) and whether you were asked. The other 25 it
+  keeps are under Earlier, where before the last ten weren't shown at all.
+  The command moved into each entry's submenu, and the log keeps 80
+  characters of a reason, down from 120.
+
 ## [0.5.0] - 2026-10-23
 
 ### Security

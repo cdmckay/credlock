@@ -41,8 +41,11 @@ const (
 	// Sweep is how often expired secrets are dropped.
 	Sweep = time.Minute
 
-	// maxUses is how many deliveries the access log keeps.
-	maxUses = 30
+	// maxUses is how many uses the access log keeps. The menu shows the
+	// latest few and the rest under Earlier. logReason is how much of each
+	// one's reason it keeps, its headline there.
+	maxUses   = 30
+	logReason = 80
 
 	maxRequest = 1 << 20
 )
@@ -438,7 +441,7 @@ func (s *Server) logUse(req proto.Request, origin string, asked bool, now time.T
 	use := menubar.Use{
 		At:      now.Format("15:04"),
 		Command: approve.CommandLine(req.Command, 80),
-		Reason:  approve.Clean(req.Reason, 120),
+		Reason:  approve.Clean(req.Reason, logReason),
 		Names:   secretNames(req.Secrets),
 		Cached:  !asked,
 		Origin:  origin,

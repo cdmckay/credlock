@@ -81,7 +81,7 @@ func (s *Server) search(ctx context.Context, req proto.Request, from asker) prot
 func (s *Server) logTold(req proto.Request, origin string, use menubar.Use, lines []string, now time.Time) {
 	s.labels[req.Account] = firstNonEmpty(req.AccountLabel, req.Account)
 	use.At = now.Format("15:04")
-	use.Reason = approve.Clean(req.Reason, 120)
+	use.Reason = approve.Clean(req.Reason, logReason)
 	use.Origin = origin
 	for _, l := range lines {
 		for len(use.Told) < maxToldLines {

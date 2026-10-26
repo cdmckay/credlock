@@ -10,5 +10,9 @@ void credlock_menubar_update(const char *json);
 // a menu bar coloured strip, to a PNG.
 int credlock_menubar_icon_snapshot(const char *path, int dark);
 
+// credlock_menubar_log_snapshot renders the access log of a snapshot, row by
+// row as the menu draws it, to a PNG.
+int credlock_menubar_log_snapshot(const char *json, const char *path, int dark);
+
 // credlock_menubar_quit ends credlock_menubar_run, and with it the process.
 void credlock_menubar_quit(void);
