@@ -22,6 +22,13 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
   The command moved into each entry's submenu, and the log keeps 80
   characters of a reason, down from 120.
 
+### Security
+
+- Nix builds and the development shell use Go 1.26.10, which fixes
+  GO-2026-6809 in certificate verification used by hub connections. The
+  flake's nixpkgs lock is updated; consumer flakes that override that input
+  must also use a nixpkgs revision containing the fixed Go version.
+
 ## [0.5.0] - 2026-10-23
 
 ### Security
