@@ -7,6 +7,8 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-28
+
 ### Fixed
 
 - 1Password connection errors now point first to the full SDK integration
@@ -195,7 +197,8 @@ The first release. macOS only.
 - A Nix flake, and a Homebrew formula in
   [cdmckay/homebrew-tap](https://github.com/cdmckay/homebrew-tap).
 
-[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/cdmckay/credlock/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/cdmckay/credlock/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/cdmckay/credlock/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/cdmckay/credlock/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cdmckay/credlock/compare/v0.2.1...v0.3.0
