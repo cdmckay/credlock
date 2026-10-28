@@ -114,9 +114,14 @@ Troubleshooting
   no 1Password account given
                        Pass --account; the message lists what's set up here.
   connecting to the 1Password app
-                       1Password isn't running or unlocked, or its SDK
-                       integration is off: Settings > Developer >
-                       "Integrate with other apps".
+                       Check 1Password > Settings > Developer >
+                       Integrate with the 1Password SDKs > Integrate with other apps.
+                       This is separate from Integrate with 1Password CLI.
+                       Then check that 1Password is running and unlocked.
+                       If it still fails, run 'credlock stop', then retry
+                       the command to clear a stale helper. Stopping
+                       forgets every approval. This also applies to
+                       "desktop app connection channel is closed".
 `
 
 // searchHelp is `credlock search --help`.

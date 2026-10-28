@@ -33,6 +33,7 @@ transcript. Only the command you approve receives them.
 
 1. In the 1Password app, open **Settings → Developer** and, under
    **Integrate with the 1Password SDKs**, choose **Integrate with other apps**.
+   This is separate from **Integrate with 1Password CLI**.
 2. Install it, one of these ways:
    - Homebrew: `brew install cdmckay/tap/credlock`
    - Nix: `nix profile install github:cdmckay/credlock`
@@ -63,6 +64,15 @@ allow it, the agent gets back up to 20 matching items, best match first, each
 with its reference and its fields' names and types, never a value. Every
 search asks again, and the access log shows what each one returned. It works
 only on the Mac with 1Password, not from a machine that asks a hub.
+
+### Connection troubleshooting
+
+For a connection failure, including `desktop app connection channel is closed`,
+first check **1Password > Settings > Developer > Integrate with the 1Password SDKs > Integrate with other apps**.
+The **Integrate with 1Password CLI** setting is separate and does not enable SDK access.
+Then check that 1Password is running and unlocked. If it still fails, run
+`credlock stop`, then retry the command to clear a stale helper. Stopping
+forgets every approval. If a request was denied, ask the person instead of retrying it.
 
 ## Other machines on your tailnet
 

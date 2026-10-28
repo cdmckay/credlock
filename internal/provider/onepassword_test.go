@@ -208,6 +208,39 @@ func TestADeniedApprovalSaysWhatToCheck(t *testing.T) {
 			t.Fatalf("error lacks %q: %v", want, err)
 		}
 	}
+	if strings.Contains(err.Error(), "credlock stop") {
+		t.Fatalf("a denial got stale-helper recovery advice: %v", err)
+	}
+}
+
+func TestAConnectionFailureExplainsSDKSetupBeforeAppAndHelperRecovery(t *testing.T) {
+	for _, message := range []string{"desktop app connection channel is closed", "connection unavailable"} {
+		t.Run(message, func(t *testing.T) {
+			cause := errors.New(message)
+			p := &OnePassword{connect: func(context.Context, string, string) (resolver, error) {
+				return nil, cause
+			}}
+			_, err := p.ResolveAll(context.Background(), "acct", []string{"op://v/i/f"})
+			if !errors.Is(err, cause) {
+				t.Fatalf("lost the connection error: %v", err)
+			}
+			rest := err.Error()
+			for _, want := range []string{
+				"connecting to the 1Password app for account acct: " + message,
+				"1Password > Settings > Developer > Integrate with the 1Password SDKs > Integrate with other apps",
+				"separate from Integrate with 1Password CLI",
+				"1Password is running and unlocked",
+				"'credlock stop', then retry the command",
+				"stopping forgets every approval",
+			} {
+				_, after, found := strings.Cut(rest, want)
+				if !found {
+					t.Fatalf("error lacks %q in recovery order: %v", want, err)
+				}
+				rest = after
+			}
+		})
+	}
 }
 
 func TestAnAccountIsRequired(t *testing.T) {
