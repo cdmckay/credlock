@@ -161,8 +161,10 @@ func connectError(account string, err error) error {
 			"or that account's SDK integration is off (1Password > Settings > Developer > Integrate with the 1Password SDKs > "+
 			"Integrate with other apps). Ask the person which, then run the command again: %w", account, err)
 	}
-	return fmt.Errorf("connecting to the 1Password app for account %s: %w. Check that 1Password is running and unlocked, and that "+
-		"Settings > Developer > Integrate with other apps is on", account, err)
+	return fmt.Errorf("connecting to the 1Password app for account %s: %w. Check that "+
+		"1Password > Settings > Developer > Integrate with the 1Password SDKs > Integrate with other apps is on "+
+		"(separate from Integrate with 1Password CLI). Then check that 1Password is running and unlocked. "+
+		"If it still fails, run 'credlock stop', then retry the command to clear a stale helper; stopping forgets every approval", account, err)
 }
 
 func (p *OnePassword) resolveAll(ctx context.Context, account string, refs []string, hintsBy time.Time) (map[string]string, error) {

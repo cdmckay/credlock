@@ -7,6 +7,12 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- 1Password connection errors now point first to the full SDK integration
+  setting, distinguish it from CLI integration, and explain checking the app
+  and restarting a stale helper with `credlock stop` before retrying.
+
 ### Changed
 
 - The access log in the menu bar shows the last five uses instead of twenty,
