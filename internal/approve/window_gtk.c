@@ -480,9 +480,13 @@ static GtkWidget *make_window(GtkWidget *root) {
   return win;
 }
 
-// start sets up GTK and libadwaita. It fails, rather than aborting, without
-// a display.
+// start sets up GTK and libadwaita, once. It fails, rather than aborting,
+// without a display.
 static gboolean start(void) {
+  static gboolean started;
+  if (started) {
+    return TRUE;
+  }
   g_set_prgname("credlock");
   g_set_application_name("credlock");
   if (!gtk_init_check()) {
@@ -493,8 +497,11 @@ static gboolean start(void) {
   AdwStyleManager *sm = adw_style_manager_get_default();
   set_colours(sm, NULL, NULL);
   g_signal_connect(sm, "notify::dark", G_CALLBACK(set_colours), NULL);
+  started = TRUE;
   return TRUE;
 }
+
+int credlock_window_start(void) { return start() ? 0 : -1; }
 
 static gboolean tick(gpointer data) {
   w.left--;
@@ -573,12 +580,8 @@ static void after_paint(GdkFrameClock *clock, gpointer root) {
 }
 
 int credlock_window_snapshot(const credlock_view *v, const char *path, int dark) {
-  static gboolean started;
-  if (!started) {
-    if (!start()) {
-      return -1;
-    }
-    started = TRUE;
+  if (!start()) {
+    return -1;
   }
   adw_style_manager_set_color_scheme(adw_style_manager_get_default(),
                                      dark ? ADW_COLOR_SCHEME_FORCE_DARK : ADW_COLOR_SCHEME_FORCE_LIGHT);

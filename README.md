@@ -291,6 +291,13 @@ mode 0700 and refuses to use if anyone else owns it.
   accessibility interface (AT-SPI), which on Linux any program running as
   you can drive without asking (tested: none of the window's 162 actions
   presses it). Deny stays in it.
+- **On Linux, the window is open to other programs running as you for its
+  first moments,** about a tenth of a second while GTK starts and asks the
+  desktop for its settings, before it shows anything, then it makes itself
+  undumpable like the rest of credlock. Where Yama's `ptrace_scope` is 1, as
+  on most distributions, only the window's parents could attach to it then;
+  where it is 0, any program running as you could, as it could to the desktop
+  itself.
 - **Known attack vector on Linux: a program running as you can point the
   helper at a display of its own.** The helper shows its window on the
   display in the systemd user manager's environment, which such a program
