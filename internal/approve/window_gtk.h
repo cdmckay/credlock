@@ -39,7 +39,13 @@ typedef struct {
   int timeout;  // seconds until it counts as Deny
 } credlock_view;
 
-// credlock_window_run shows the window and waits for an answer.
+// credlock_window_start sets up GTK and libadwaita, which read the desktop's
+// settings, light or dark mode among them, from its portal. It returns
+// nonzero without a display.
+int credlock_window_start(void);
+
+// credlock_window_run shows the window and waits for an answer. It starts
+// GTK first if credlock_window_start hasn't.
 int credlock_window_run(const credlock_view *v);
 
 // credlock_window_snapshot renders the window to a PNG without showing it.

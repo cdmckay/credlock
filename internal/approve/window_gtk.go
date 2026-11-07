@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"time"
 	"unsafe"
+
+	"github.com/cdmckay/credlock/internal/platform"
 )
 
 // GTK must run on the thread it started on, the process's main thread.
@@ -51,6 +53,18 @@ func WindowMain(stdin io.Reader, stdout io.Writer) int {
 		return 2
 	}
 	_ = os.Setenv("GDK_BACKEND", "wayland")
+	if C.credlock_window_start() != 0 {
+		fmt.Fprintln(os.Stderr, "credlock: the approval window could not start GTK; is there a display?")
+		return 2
+	}
+	// Only now that GTK has read the desktop's settings: its portal doesn't
+	// answer a process that isn't dumpable, and the window would show light
+	// in dark mode. It holds no secret, but nothing may attach to it and
+	// answer for the person, so it is protected before it shows anything.
+	if err := platform.Protect(); err != nil {
+		fmt.Fprintln(os.Stderr, "credlock: keeping other processes out of the approval window:", err)
+		return 2
+	}
 	cv, free := cView(v)
 	defer free()
 	switch C.credlock_window_run(cv) {

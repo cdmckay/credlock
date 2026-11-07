@@ -170,6 +170,12 @@ with the cost of each way around it.
   rest. Variable names are full of underscores, so the tray asks the bus
   which process hosts it and escapes for that host.
 
+- **The desktop portal doesn't answer an undumpable process outside a
+  sandbox,** so libadwaita can't learn that the desktop is dark and the
+  window shows light. The approval window protects itself only once GTK has
+  started, before it shows anything. Check it from a process systemd starts:
+  inside an agent's sandbox the portal answers anyway.
+
 ## Working on it
 
 - Write like the code around you. Comments explain why, not what. Test names

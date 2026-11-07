@@ -42,7 +42,9 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 - On Linux, credlock's processes make themselves undumpable, so other
   processes running as you can't read the secrets the helper and its
   resolvers hold, through ptrace or `/proc`, and none are written to a core
-  dump.
+  dump. The approval window does so once GTK has started, before it shows
+  anything: the desktop's portal, which tells it whether the desktop is in
+  dark mode, doesn't answer an undumpable process.
 
 ## [0.5.1] - 2026-10-28
 

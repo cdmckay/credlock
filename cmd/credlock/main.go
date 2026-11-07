@@ -36,10 +36,13 @@ func currentVersion() string {
 
 func main() {
 	// Before anything holds a secret: the helper, its resolvers, and this
-	// client until it becomes the command.
-	if err := platform.Protect(); err != nil {
-		fmt.Fprintln(os.Stderr, "credlock: keeping other processes out of this one's memory:", err)
-		os.Exit(1)
+	// client until it becomes the command. The approval window protects
+	// itself once GTK has read the desktop's settings (approve.WindowMain).
+	if len(os.Args) < 2 || os.Args[1] != approve.WindowCommand {
+		if err := platform.Protect(); err != nil {
+			fmt.Fprintln(os.Stderr, "credlock: keeping other processes out of this one's memory:", err)
+			os.Exit(1)
+		}
 	}
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, overview)
