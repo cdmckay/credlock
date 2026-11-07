@@ -460,7 +460,7 @@ func viaHubs(cfg config.Config, req proto.Request) (proto.Response, error) {
 func Pair(args []string) int {
 	if platform.HasHelper() {
 		if !platform.Hub {
-			return fail(fmt.Errorf("this machine has its own helper (%s=1) and pairs nothing; to ask a Mac instead, unset %s", platform.HelperSwitch, platform.HelperSwitch))
+			return fail(errors.New("this machine has its own helper, with the 1Password app, and pairs nothing"))
 		}
 		return fail(errors.New("this Mac has its own helper and pairs nothing; to let other machines ask it, run credlock hub on"))
 	}

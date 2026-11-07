@@ -7,11 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
-
-	"github.com/ncruces/zenity"
 
 	"github.com/cdmckay/credlock/internal/proto"
 )
@@ -49,96 +46,11 @@ type Approver interface {
 	Approve(ctx context.Context, r Request) (bool, error)
 }
 
-// ErrTimedOut is a dialog nobody answered in time.
-var ErrTimedOut = errors.New("nobody answered the approval dialog in time")
+// ErrTimedOut is a window nobody answered in time.
+var ErrTimedOut = errors.New("nobody answered the approval window in time")
 
-// Dialog asks through the zenity library's plain dialog: zenity or kdialog on
-// Linux, the system alert on macOS. It is the approver where credlock has no
-// window of its own (see Default). Deny is the default, and a dialog nobody
-// answers within Timeout counts as a denial.
-type Dialog struct {
-	Timeout time.Duration
-}
-
-// Approve shows the request and waits for Allow or Deny.
-func (d Dialog) Approve(ctx context.Context, r Request) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, d.Timeout)
-	defer cancel()
-	err := zenity.Question(Body(r),
-		zenity.Title(Title(r)),
-		zenity.OKLabel("Allow"),
-		zenity.CancelLabel("Deny"),
-		zenity.DefaultCancel(),
-		zenity.Context(ctx),
-	)
-	switch {
-	case err == nil:
-		return true, nil
-	case errors.Is(err, zenity.ErrCanceled):
-		return false, nil
-	case ctx.Err() != nil:
-		return false, ErrTimedOut
-	case errors.Is(err, exec.ErrNotFound):
-		return false, errors.New("there is no dialog program to ask with: until credlock has a window of its own here, " +
-			"its helper asks in a zenity dialog, and needs zenity (or qarma, or matedialog) on the PATH it was started with")
-	default:
-		return false, err
-	}
-}
-
-// Title is the dialog's headline.
-func Title(r Request) string {
-	if r.Search != "" {
-		return "credlock: allow a search of item titles?"
-	}
-	if len(r.Secrets) == 1 {
-		return "credlock: allow 1 secret?"
-	}
-	return fmt.Sprintf("credlock: allow %d secrets?", len(r.Secrets))
-}
-
-// Body is the dialog's text. Nearly all of it came from the client, so each
-// field is flattened onto one line and cut to length: a reason with newlines
-// in it must not be able to draw fake lines into the dialog.
-func Body(r Request) string {
-	var b strings.Builder
-	reason := clean(r.Reason, 200)
-	if reason == "" {
-		reason = "(none given)"
-	}
-	fmt.Fprintf(&b, "Reason:  %s\n", reason)
-	fmt.Fprintf(&b, "Command:  %s\n", clean(quote(r.Command), 300))
-	fmt.Fprintf(&b, "Directory:  %s\n", clean(tildify(r.Cwd), 200))
-	if r.Origin != "" {
-		fmt.Fprintf(&b, "FROM ANOTHER MACHINE:  %s, over Tailscale\n", clean(r.Origin, 100))
-	}
-	fmt.Fprintf(&b, "Requested by:  %s\n", clean(r.Requester, 100))
-	if r.Account != "" {
-		fmt.Fprintf(&b, "1Password account:  %s\n", clean(r.Account, 100))
-	}
-	b.WriteString("\n")
-	if r.Search != "" {
-		fmt.Fprintf(&b, "Search item titles for:  %s\n", clean(r.Search, 100))
-		fmt.Fprintf(&b, "\n%s", SearchNote)
-		return b.String()
-	}
-	for _, s := range r.Secrets {
-		fmt.Fprintf(&b, "%s  →  %s\n", clean(s.Name, 80), clean(s.Ref, 200))
-	}
-	if r.Approved > 0 {
-		fmt.Fprintf(&b, "(plus %d already approved)\n", r.Approved)
-	}
-	if r.Cap <= r.Window {
-		fmt.Fprintf(&b, "\nApproved secrets stay available for %s.", human(r.Cap))
-	} else {
-		fmt.Fprintf(&b, "\nApproved secrets stay available for %s after their last use, and %s at most.",
-			human(r.Window), human(r.Cap))
-	}
-	return b.String()
-}
-
-// SearchNote says what a search sends back, for both the dialog and the
-// window: names, never values, and nothing kept.
+// SearchNote says what a search sends back, for the window: names, never
+// values, and nothing kept.
 var SearchNote = fmt.Sprintf("If you allow it, it gets back the titles, references and field names of up to %d matching items. "+
 	"Never a value. Nothing is kept: the next search asks again.", proto.MaxFound)
 

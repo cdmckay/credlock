@@ -10,7 +10,6 @@ import "C"
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -54,20 +53,16 @@ func WindowMain(stdin io.Reader, stdout io.Writer) int {
 	}
 }
 
+// hubViews says whether this window shows requests from other machines and
+// pairings, which only a hub produces.
+const hubViews = true
+
 // readView reads the helper's View and re-encodes it, so the window sees only
 // the fields credlock defines.
 func readView(r io.Reader) (string, error) {
-	data, err := io.ReadAll(io.LimitReader(r, 1<<20))
+	v, err := parseView(r)
 	if err != nil {
 		return "", err
-	}
-	var v View
-	if err := json.Unmarshal(data, &v); err != nil {
-		return "", fmt.Errorf("reading the approval window's content: %w", err)
-	}
-	asks := len(v.Secrets) > 0 || v.Kind == "pair" || (v.Kind == "search" && v.Search != "")
-	if !asks || v.Timeout <= 0 {
-		return "", errors.New("the approval window was started without secrets, a search or a timeout")
 	}
 	out, err := json.Marshal(v)
 	return string(out), err

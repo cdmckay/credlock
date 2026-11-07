@@ -159,6 +159,11 @@ with the cost of each way around it.
   credlock process makes itself undumpable, which also closes
   `/proc/PID/mem` and `environ` to anyone but root.
 
+- **GTK shows a widget to the accessibility interface again whenever it is
+  mapped,** so marking it hidden doesn't last. Allow's widgets are built
+  with the presentation role instead, which keeps them out. Check with an
+  AT-SPI client that lists the window's tree and tries every action in it.
+
 ## Working on it
 
 - Write like the code around you. Comments explain why, not what. Test names
@@ -170,6 +175,7 @@ with the cost of each way around it.
   `go test -race`, golangci-lint, govulncheck, `nix build` and a Linux build.
 - UI changes: render them with `CREDLOCK_SNAPSHOT_DIR=/tmp/shots go test
   ./internal/approve ./internal/menubar`, and look at both light and dark.
+  On Linux add `-tags gtk`; each window shows for a moment while it renders.
   Then test live, because tests can't click.
 - A change people will notice gets a line under Unreleased in CHANGELOG.md, in
   the same pull request. Releases follow RELEASING.md, with SemVer.

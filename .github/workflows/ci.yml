@@ -90,15 +90,25 @@ jobs:
         with:
           go-version: "1.26.x"
           check-latest: true
-      - run: go build ./...
+      # The approval window: GTK 4 and libadwaita, behind the gtk tag.
+      - name: GTK 4 and libadwaita
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-4-dev libadwaita-1-dev
+      - run: go build ./... && go build -tags gtk ./...
         env:
           CGO_ENABLED: "1"
-      - run: go vet ./...
-      # The helper's Linux half: its socket, its caller, and Protect.
+      - run: go vet ./... && go vet -tags gtk ./...
+      # The helper's Linux half: its socket, its caller, Protect, and the
+      # window's refusals. Both builds: with the window, and without it as on
+      # a server.
       - name: Tests, with the race detector
-        run: go test -race -count=1 ./...
+        run: go test -race -count=1 ./... && go test -race -count=1 -tags gtk ./...
         env:
           CGO_ENABLED: "1"
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
+      - name: Lint, with the window
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0
+          args: --build-tags gtk

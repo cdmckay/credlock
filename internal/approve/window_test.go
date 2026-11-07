@@ -68,11 +68,6 @@ func TestATTLIsTheWholeLifetime(t *testing.T) {
 			t.Errorf("%s, %s: got %q, want %q", tc.window, tc.cap, got, tc.want)
 		}
 	}
-	r := sample
-	r.Window, r.Cap = 15*time.Minute, 15*time.Minute
-	if body := Body(r); !strings.Contains(body, "stay available for 15 minutes.") {
-		t.Errorf("the plain dialog doesn't say 15 minutes:\n%s", body)
-	}
 }
 
 func TestARemoteRequestSaysSoFirst(t *testing.T) {

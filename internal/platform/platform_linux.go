@@ -21,9 +21,27 @@ const Supported = true
 // tailnet. Only a Mac can so far.
 const Hub = false
 
-// HasHelper says whether this system runs a credlock helper. Without one,
-// credlock asks the hubs in its config instead, as it always has on Linux.
-func HasHelper() bool { return os.Getenv(HelperSwitch) == "1" }
+// HasHelper says whether this system runs a credlock helper: this build has
+// the approval window, and the 1Password app is installed. Without one, as on
+// a server, credlock asks the hubs in its config instead.
+func HasHelper() bool { return hasWindow && onePasswordInstalled() }
+
+// sdkLibraries are where the 1Password SDK looks for the app's library on
+// Linux, and the only places it looks.
+var sdkLibraries = []string{
+	"/usr/bin/1password/libop_sdk_ipc_client.so",
+	"/opt/1Password/libop_sdk_ipc_client.so",
+	"/snap/bin/1password/libop_sdk_ipc_client.so",
+}
+
+func onePasswordInstalled() bool {
+	for _, lib := range sdkLibraries {
+		if _, err := os.Stat(lib); err == nil {
+			return true
+		}
+	}
+	return false
+}
 
 // Protect keeps other processes out of this one's memory, where the helper and
 // its resolvers hold secret values. Linux lets a process running as the same
