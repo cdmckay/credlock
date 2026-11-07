@@ -164,6 +164,12 @@ with the cost of each way around it.
   with the presentation role instead, which keeps them out. Check with an
   AT-SPI client that lists the window's tree and tries every action in it.
 
+- **GNOME's AppIndicator extension reads underscores in menu labels its own
+  way:** it drops only the first `_` that comes before another character,
+  where the dbusmenu spec (and KDE) read `__` as one underscore and drop the
+  rest. Variable names are full of underscores, so the tray asks the bus
+  which process hosts it and escapes for that host.
+
 ## Working on it
 
 - Write like the code around you. Comments explain why, not what. Test names
