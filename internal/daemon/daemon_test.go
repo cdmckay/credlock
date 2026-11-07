@@ -104,9 +104,9 @@ type harness struct {
 func newHarness(t *testing.T, allow bool, configure ...func(*Server)) *harness {
 	t.Helper()
 	// The harness talks to a helper over its socket, which needs the platform
-	// layer to say who is calling. Only macOS has one; elsewhere credlock asks a
-	// hub instead, and the helper never runs.
-	if !platform.HasHelper {
+	// layer to say who is calling. Only macOS and Linux have one; elsewhere
+	// credlock asks a hub instead, and the helper never runs.
+	if !platform.Supported {
 		t.Skip("no credlock helper on this system")
 	}
 	// Unix socket paths are capped near 104 bytes on macOS, so keep it short.

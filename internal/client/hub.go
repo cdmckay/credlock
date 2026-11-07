@@ -15,8 +15,11 @@ import (
 // up. The tailnet it's on is remembered, machines pair the first time they
 // ask, and a login item keeps it answering after a restart.
 func Hub(args []string) int {
-	if !platform.HasHelper {
+	if !platform.HasHelper() {
 		return fail(fmt.Errorf("hub mode runs on a Mac with the 1Password app; this machine asks one instead (credlock run does that on its own)"))
+	}
+	if !platform.Hub {
+		return fail(errors.New("hub mode runs only on a Mac so far; this machine can ask one instead"))
 	}
 	req := proto.Request{Op: proto.OpHub, Hub: proto.HubStatus}
 	switch {

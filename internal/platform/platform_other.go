@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !linux
 
 package platform
 
@@ -7,14 +7,22 @@ import (
 	"net"
 )
 
-// On Linux the socket belongs in $XDG_RUNTIME_DIR (per-user, mode 0700, wiped
-// at logout) and the peer comes from SO_PEERCRED plus /proc/<pid>/comm. Neither
-// is written yet; until then credlock says so rather than guessing.
-var errUnsupported = errors.New("credlock only supports macOS so far")
+var errUnsupported = errors.New("credlock only supports macOS and Linux so far")
+
+// Supported says whether credlock has this system's half of the helper: where
+// its socket lives, and who is calling it.
+const Supported = false
+
+// Hub says whether this system can be a hub, answering other machines on its
+// tailnet.
+const Hub = false
 
 // HasHelper says whether this system runs a credlock helper. Without one,
 // credlock asks the hubs in its config instead.
-const HasHelper = false
+func HasHelper() bool { return false }
+
+// Protect does nothing here: no helper runs on this system.
+func Protect() error { return nil }
 
 // SocketPath is not implemented on this system yet.
 func SocketPath() (string, error) { return "", errUnsupported }
