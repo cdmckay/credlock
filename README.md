@@ -313,3 +313,6 @@ release is in [CHANGELOG.md](CHANGELOG.md), and how a release is cut is in
 GPL-3.0-or-later, with an additional permission to link against the 1Password
 SDK and its compiled core. See [LICENSE](LICENSE) and
 [LICENSE-EXCEPTION](LICENSE-EXCEPTION).
+
+The tray icon's key on Linux is Adwaita's `dialog-password-symbolic`, by the
+[GNOME Project](https://www.gnome.org), used under the GNU LGPL v3.

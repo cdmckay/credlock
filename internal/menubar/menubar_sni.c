@@ -335,8 +335,10 @@ static gboolean host_is_gnome(const char *owner) {
     }
     fclose(f);
   }
+  // Contains, not equals: NixOS runs it as ".gnome-shell-wrapped", which
+  // the kernel cuts to ".gnome-shell-wr".
   comm[strcspn(comm, "\n")] = 0;
-  return strcmp(comm, "gnome-shell") == 0;
+  return strstr(comm, "gnome-shell") != NULL;
 }
 
 static void registered(GObject *src, GAsyncResult *res, gpointer data) {

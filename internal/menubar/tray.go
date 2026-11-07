@@ -246,21 +246,27 @@ func quote(s string) string {
 
 // The tray's icons: a key, as on the Mac, as symbolic icons, so the tray
 // draws them in the panel's own colour. While secrets are read, an orange
-// dot sits on the key's corner (the theme's warning colour); while there are
-// alerts, the key is red (its error colour).
+// dot sits in the key's free corner (the theme's warning colour); while there
+// are alerts, the key is red (its error colour).
 const (
 	iconKey     = "credlock-key-symbolic"
 	iconReading = "credlock-key-reading-symbolic"
 	iconAlert   = "credlock-key-alert-symbolic"
 )
 
-const keyShape = `<path d="M5 3.75a4.25 4.25 0 1 0 0 8.5a4.25 4.25 0 1 0 0-8.5zm0 2.5a1.75 1.75 0 1 1 0 3.5a1.75 1.75 0 1 1 0-3.5z" fill-rule="evenodd"/>` +
-	`<rect x="8.5" y="7" width="7" height="2"/><rect x="11.5" y="9" width="1.75" height="2.5"/><rect x="14" y="9" width="1.5" height="3"/>`
+// keyPath is Adwaita's dialog-password-symbolic, the key GNOME's own password
+// dialogs show, by the GNOME Project (https://www.gnome.org), used under the
+// GNU LGPL v3. The same shape in every state, and on every desktop, so the
+// icon never jumps between a theme's key and this one.
+const keyPath = "m 6 1 c -2.761719 0 -5 2.238281 -5 5 s 2.238281 5 5 5 c 0.832031 -0.003906 1.652344 -0.214844 " +
+	"2.382812 -0.617188 l 0.617188 0.617188 v 2 h 2 v 2 h 4 v -3 l -4.308594 -4.308594 c 0.199219 -0.542968 " +
+	"0.304688 -1.113281 0.308594 -1.691406 c 0 -2.761719 -2.238281 -5 -5 -5 z m -1 3 c 0.550781 0 1 0.449219 " +
+	"1 1 s -0.449219 1 -1 1 s -1 -0.449219 -1 -1 s 0.449219 -1 1 -1 z m 0 0"
 
 var icons = map[string]string{
-	iconKey:     svg(`<g fill="#2e3436">` + keyShape + `</g>`),
-	iconReading: svg(`<g fill="#2e3436">` + keyShape + `</g><circle class="warning" fill="#f57900" cx="13" cy="3.5" r="2.5"/>`),
-	iconAlert:   svg(`<g class="error" fill="#cc0000">` + keyShape + `</g>`),
+	iconKey:     svg(`<path d="` + keyPath + `" fill="#2e3436"/>`),
+	iconReading: svg(`<path d="` + keyPath + `" fill="#2e3436"/><circle class="warning" fill="#f57900" cx="13.25" cy="2.75" r="2.25"/>`),
+	iconAlert:   svg(`<path class="error" d="` + keyPath + `" fill="#cc0000"/>`),
 }
 
 func svg(body string) string {
