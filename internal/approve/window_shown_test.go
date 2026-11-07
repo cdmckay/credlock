@@ -1,3 +1,5 @@
+//go:build darwin || (linux && gtk)
+
 package approve
 
 import (
@@ -16,8 +18,8 @@ import (
 //
 //	CREDLOCK_SNAPSHOT_DIR=/tmp/shots go test ./internal/approve
 //
-// It happens here because AppKit needs the main thread, and only TestMain runs
-// on it.
+// It happens here because AppKit and GTK need the main thread, and only
+// TestMain runs on it.
 func TestMain(m *testing.M) {
 	if dir := os.Getenv("CREDLOCK_SNAPSHOT_DIR"); dir != "" && os.Getenv("CREDLOCK_FAKE_WINDOW") == "" {
 		if err := snapshots(dir); err != nil {
@@ -66,8 +68,11 @@ func snapshots(dir string) error {
 	longSearch := search
 	longSearch.Reason = long.Reason
 	longSearch.Search = strings.TrimSpace(strings.Repeat("metrics collector deploy key ", 4))[:proto.MaxSearch]
-	for name, r := range map[string]Request{"one": one, "two": sample, "many": long, "remote": remote, "pairing": pairing, "ttl": ttl,
-		"search": search, "search-long": longSearch} {
+	views := map[string]Request{"one": one, "two": sample, "many": long, "ttl": ttl, "search": search, "search-long": longSearch}
+	if hubViews {
+		views["remote"], views["pairing"] = remote, pairing
+	}
+	for name, r := range views {
 		for _, dark := range []bool{false, true} {
 			mode := "light"
 			if dark {

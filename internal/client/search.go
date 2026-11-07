@@ -79,7 +79,7 @@ func Search(args []string) int {
 		return fail(err)
 	}
 	if !platform.HasHelper() {
-		return fail(errors.New("credlock search works only on the Mac with 1Password for now, not through a hub. " +
+		return fail(errors.New("credlock search works only where 1Password is, not through a hub. " +
 			"Ask the person for the reference you need"))
 	}
 	account, label, err := ResolveAccount(s.Account, Accounts())

@@ -93,3 +93,19 @@ func TestFakeProtectedProcess(t *testing.T) {
 	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 	os.Exit(0)
 }
+
+func TestTheHelperRunsOnlyWhereOnePasswordIs(t *testing.T) {
+	saved := sdkLibraries
+	t.Cleanup(func() { sdkLibraries = saved })
+	lib := filepath.Join(t.TempDir(), "libop_sdk_ipc_client.so")
+	sdkLibraries = []string{lib}
+	if HasHelper() {
+		t.Fatal("a helper without 1Password: a server would stop asking its hub")
+	}
+	if err := os.WriteFile(lib, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if HasHelper() != hasWindow {
+		t.Fatalf("with 1Password installed, HasHelper is %v in a build whose window is %v", HasHelper(), hasWindow)
+	}
+}

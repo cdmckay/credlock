@@ -137,7 +137,7 @@ const searchHelp = `credlock search
 
   Every search asks again: nothing is kept. More than 20 matches ends with
   how many more; search for something narrower to see them. It works only
-  on the Mac with 1Password, not from a machine that asks a hub.
+  where 1Password is, not from a machine that asks a hub.
 
   --reason TEXT      Required. What you are looking for, and why, in a few
                      plain words. The person reads it before deciding.

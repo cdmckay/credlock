@@ -38,7 +38,9 @@ transcript. Only the command you approve receives them.
    - Homebrew: `brew install cdmckay/tap/credlock`
    - Nix: `nix profile install github:cdmckay/credlock`
    - Go, with Apple's command line tools for cgo:
-     `go install github.com/cdmckay/credlock/cmd/credlock@latest`
+     `go install github.com/cdmckay/credlock/cmd/credlock@latest`. On Linux,
+     add `-tags gtk` for the approval window, with GTK 4 and libadwaita's
+     development files installed.
 3. Tell credlock which account the secrets are in, with `--account` or
    `CREDLOCK_ACCOUNT`. It takes the account ID (the `account_uuid` column of
    `op account list`), the sign-in address or its first part (`my`), your
@@ -63,7 +65,7 @@ The window shows the term and the reason, which a search must give. If you
 allow it, the agent gets back up to 20 matching items, best match first, each
 with its reference and its fields' names and types, never a value. Every
 search asks again, and the access log shows what each one returned. It works
-only on the Mac with 1Password, not from a machine that asks a hub.
+only where 1Password is, not from a machine that asks a hub.
 
 ### Connection troubleshooting
 
@@ -74,25 +76,29 @@ Then check that 1Password is running and unlocked. If it still fails, run
 `credlock stop`, then retry the command to clear a stale helper. Stopping
 forgets every approval. If a request was denied, ask the person instead of retrying it.
 
-### Linux (experimental)
+### Linux
 
-With 1Password for Linux, credlock can run its own helper there, as on a Mac,
-instead of asking a hub. It is off unless `CREDLOCK_LINUX_HELPER=1` is in the
-environment `credlock` runs in, because until credlock has an approval window
-of its own on Linux it asks in a zenity dialog, which doesn't keep all of the
-window's rules ([Limits](#limits)).
+With 1Password for Linux, credlock runs its own helper and approval window
+there, as on a Mac. Where 1Password isn't installed, as on a server, it asks
+a hub instead ([below](#other-machines-on-your-tailnet)).
 
-- Install zenity, and turn on the SDK setting in 1Password as above.
+- The window is GTK 4 and libadwaita, and shows only in a Wayland session:
+  under X11 any program could click its Allow ([Limits](#limits)). The Nix
+  package includes it. For a machine that only asks a hub,
+  `nix profile install github:cdmckay/credlock#headless` leaves GTK out.
 - The 1Password SDK looks for the app only where 1Password installs it:
   `/opt/1Password` (where its `.deb` and `.rpm` put it), `/usr/bin/1password`
-  or `/snap/bin/1password`. On NixOS the app is in the Nix store instead, so
-  link it:
+  or `/snap/bin/1password`, and credlock looks there to tell whether to run
+  its helper. On NixOS the app is in the Nix store instead, so link it:
 
   ```nix
   systemd.tmpfiles.rules = [
     "L+ /opt/1Password - - - - ${config.programs._1password-gui.package}/share/1password"
   ];
   ```
+
+  A sandbox set up before the link existed, such as an app's FHS sandbox,
+  doesn't see it until that app restarts, and asks a hub meanwhile.
 - Where systemd runs a user manager, the helper runs as its service
   `credlock-helper`, outside whatever started it, such as an agent's sandbox,
   and with the session's display and `PATH` rather than the caller's.
@@ -177,7 +183,7 @@ How it's kept safe:
 | Command | What it does |
 |---|---|
 | `credlock run [--reason TEXT] [--account NAME] [--ttl DURATION] [--] COMMAND…` | Runs the command with every `op://` environment variable replaced by its secret. Exits 77 if you deny the request. `--ttl` ends the approval that long from now, up to an hour, such as `15m`; it only ever shortens one. |
-| `credlock search --reason TEXT [--account NAME] TERM` | Find items whose titles contain the term, when you don't know a reference. After you allow it, prints up to 20 of them with their references and field names, never values. Every search asks. Exits 77 if you deny it. Only on the Mac with 1Password. |
+| `credlock search --reason TEXT [--account NAME] TERM` | Find items whose titles contain the term, when you don't know a reference. After you allow it, prints up to 20 of them with their references and field names, never values. Every search asks. Exits 77 if you deny it. Only where 1Password is. |
 | `credlock forget [--account NAME] [REF…]` | Forget the approvals for these references now, or for the `op://` variables in the environment if none are named. Without an account, in every account. A machine that asks a Mac keeps no approvals of its own to forget: use `--ttl` there. |
 | `credlock status` | Whether the helper is running, and what it holds: references and time left, never values. |
 | `credlock clear` | Forget every approved secret. |
@@ -192,7 +198,8 @@ How it's kept safe:
   unix socket. It starts the helper if it isn't running.
 - The helper checks with the kernel that the caller is the same user, then
   answers what it already holds. Anything new goes to the approval window, one
-  at a time: a native AppKit window that the helper opens in a child process.
+  at a time: a native window, AppKit on a Mac and GTK 4 on Linux, that the
+  helper opens in a child process.
   Deny is the default. Esc denies and Return does nothing, so typing that lands
   on the window can't approve anything. Allow takes a mouse click, and ignores
   clicks for its first second on screen, so a click meant for another window
@@ -275,17 +282,19 @@ mode 0700 and refuses to use if anyone else owns it.
   first contact too, and one with no window to check, since the Mac already
   knows the machine. The Mac has to be awake, on the tailnet, with hub mode
   on.
-- **Linux is experimental.** Its helper asks in a zenity dialog, not a window
-  of credlock's own. Esc denies and Deny has the focus, so Return denies, but
-  Tab then Return reaches Allow, and nothing ignores a click in its first
-  second. zenity is an ordinary GTK app, so a program running as you that
-  drives the desktop's accessibility interface (AT-SPI) may be able to press
-  Allow, with no permission asked, and under X11 rather than Wayland any X
-  client can click it. The helper finds zenity on the systemd user manager's
-  `PATH`, which a program running as you can change. There is no menu bar
-  icon, so a use isn't shown as it happens. Without systemd, the helper
-  starts with the caller's environment, its display and `PATH` included.
-  Other systems, such as Linux servers without 1Password, ask a Mac (above).
+- **On Linux, the window needs Wayland,** which keeps other programs from
+  clicking in it or reading it. Under X11 it refuses to show. Allow can't be
+  focused or pressed from the keyboard, and it is left out of the
+  accessibility interface (AT-SPI), which on Linux any program running as
+  you can drive without asking (tested: none of the window's 162 actions
+  presses it). Deny stays in it.
+- **Known attack vector on Linux: a program running as you can point the
+  helper at a display of its own.** The helper shows its window on the
+  display in the systemd user manager's environment, which such a program
+  can change (`systemctl --user set-environment`), then restart the helper,
+  and click Allow in a compositor it runs itself. There is no menu bar icon
+  on Linux, so uses aren't shown as they happen. Without systemd, the helper
+  starts with the caller's environment, its display included.
 
 ## Releases
 

@@ -1,20 +1,31 @@
-//go:build !darwin
+//go:build !darwin && !(linux && gtk)
 
 package approve
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"time"
 )
 
-// Default is the approver the helper uses. Outside macOS, credlock has no
-// window of its own yet, so it is the zenity dialog.
-func Default(timeout time.Duration) Approver { return Dialog{Timeout: timeout} }
+// errNoWindow is why this build can't ask: it has no approval window. On
+// Linux the window is GTK 4, behind the gtk build tag.
+var errNoWindow = errors.New("this credlock has no approval window: on Linux, it is built with the gtk tag " +
+	"(go build -tags gtk, or the Nix package's default output)")
 
-// WindowMain is `credlock __approve`, which only exists on macOS so far.
+// Default is the approver the helper uses. This build has no window, so it
+// refuses every request: without one, nothing can count as Allow.
+func Default(time.Duration) Approver { return noWindow{} }
+
+type noWindow struct{}
+
+func (noWindow) Approve(context.Context, Request) (bool, error) { return false, errNoWindow }
+
+// WindowMain is `credlock __approve`, which this build doesn't have.
 func WindowMain(io.Reader, io.Writer) int {
-	fmt.Fprintln(os.Stderr, "credlock: the approval window is macOS-only so far")
+	fmt.Fprintln(os.Stderr, "credlock:", errNoWindow)
 	return 2
 }

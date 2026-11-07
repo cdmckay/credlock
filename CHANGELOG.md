@@ -9,17 +9,28 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ### Added
 
-- Experimental: on Linux, with `CREDLOCK_LINUX_HELPER=1`, credlock runs its
-  own helper against the 1Password app there, as on a Mac, instead of
-  asking a hub. It asks in a zenity dialog until it has an approval window
-  of its own on Linux, which doesn't keep all of the window's rules, so it
-  stays off without the switch. The helper runs as the systemd user service
+- On Linux, with 1Password for Linux, credlock runs its own helper and
+  approval window there, as on a Mac, instead of asking a hub. The window
+  is GTK 4 and libadwaita, with the Mac window's rules: Deny by default, Esc
+  denies, Return does nothing, and Allow takes a mouse click, ignoring its
+  first second. It shows only under Wayland, and Allow is left out of the
+  accessibility interface. Machines without 1Password, such as servers,
+  still ask a hub. The helper runs as the systemd user service
   `credlock-helper`, with the session's display and PATH rather than the
-  caller's. It has no menu bar icon and no hub mode yet. See Linux in the
-  README.
-- On Linux, a missing 1Password library or dialog program is explained:
-  where the 1Password SDK looks for the app, including the link NixOS needs,
-  and that the dialog needs zenity.
+  caller's. There is no menu bar icon or hub mode on Linux yet. See Linux in
+  the README.
+- A `headless` Nix package, without the window or GTK, for machines that
+  only ask a hub.
+- On Linux, a missing 1Password library is explained: where the 1Password
+  SDK looks for the app, including the link NixOS needs.
+
+### Changed
+
+- On Linux, the default Nix package now has the approval window, and with
+  it GTK 4 and libadwaita: a closure of about 900 MB, against about 60 MB
+  without. Machines that only ask a hub should install `#headless`.
+- The zenity dialog that stood in for a window outside macOS is gone, with
+  its dependency. A build without a window refuses every request instead.
 
 ### Security
 
