@@ -170,7 +170,7 @@ func Run(args []string) int {
 		}
 		var resp proto.Response
 		switch {
-		case platform.HasHelper:
+		case platform.HasHelper():
 			resp, err = Call(req, true)
 		default:
 			// No 1Password here: a Mac on the tailnet asks you, and sends
@@ -238,7 +238,7 @@ func Forget(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	if !platform.HasHelper {
+	if !platform.HasHelper() {
 		return fail(errors.New("this machine keeps no approvals: the Mac it asks holds them, and forgets them an hour after their last use. " +
 			"To keep them shorter, pass --ttl to credlock run"))
 	}
@@ -375,20 +375,15 @@ func CallAt(path string, req proto.Request, start bool) (proto.Response, error) 
 	return resp, nil
 }
 
-// startHelper launches this binary as the helper in its own session, with no
-// terminal and stdio on /dev/null, then waits for its socket.
+// startHelper launches this binary as the helper, then waits for its socket.
 func startHelper(path string) (net.Conn, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(exe, proto.HelperCommand)
-	cmd.Dir = "/"
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
+	if err := launchHelper(exe); err != nil {
 		return nil, err
 	}
-	_ = cmd.Process.Release()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		conn, err := net.Dial("unix", path)
@@ -397,6 +392,19 @@ func startHelper(path string) (net.Conn, error) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// launchDetached starts exe as the helper in its own session, with no
+// terminal and stdio on /dev/null.
+func launchDetached(exe string) error {
+	cmd := exec.Command(exe, proto.HelperCommand)
+	cmd.Dir = "/"
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	_ = cmd.Process.Release()
+	return nil
 }
 
 func fail(err error) int {
@@ -450,7 +458,10 @@ func viaHubs(cfg config.Config, req proto.Request) (proto.Response, error) {
 // as credlock run refuses it: `credlock pair --forget MAC` drops the old key
 // on purpose, after a reinstall there.
 func Pair(args []string) int {
-	if platform.HasHelper {
+	if platform.HasHelper() {
+		if !platform.Hub {
+			return fail(fmt.Errorf("this machine has its own helper (%s=1) and pairs nothing; to ask a Mac instead, unset %s", platform.HelperSwitch, platform.HelperSwitch))
+		}
 		return fail(errors.New("this Mac has its own helper and pairs nothing; to let other machines ask it, run credlock hub on"))
 	}
 	forget := len(args) == 2 && args[0] == "--forget"

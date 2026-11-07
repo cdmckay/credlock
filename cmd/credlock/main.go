@@ -12,6 +12,7 @@ import (
 	"github.com/cdmckay/credlock/internal/client"
 	"github.com/cdmckay/credlock/internal/daemon"
 	"github.com/cdmckay/credlock/internal/menubar"
+	"github.com/cdmckay/credlock/internal/platform"
 	"github.com/cdmckay/credlock/internal/proto"
 	"github.com/cdmckay/credlock/internal/provider"
 )
@@ -34,6 +35,12 @@ func currentVersion() string {
 }
 
 func main() {
+	// Before anything holds a secret: the helper, its resolvers, and this
+	// client until it becomes the command.
+	if err := platform.Protect(); err != nil {
+		fmt.Fprintln(os.Stderr, "credlock: keeping other processes out of this one's memory:", err)
+		os.Exit(1)
+	}
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, overview)
 		os.Exit(2)

@@ -78,7 +78,7 @@ func Search(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	if !platform.HasHelper {
+	if !platform.HasHelper() {
 		return fail(errors.New("credlock search works only on the Mac with 1Password for now, not through a hub. " +
 			"Ask the person for the reference you need"))
 	}

@@ -25,9 +25,9 @@
             inherit version;
             src = self;
             vendorHash = "sha256-mV/B7JaCEIwmW1slxvaGFuys96AgZ21/yxUlccvXz24=";
-            # The 1Password SDK's desktop-app sign-in needs cgo, on a Mac. On
-            # Linux credlock only asks a Mac in hub mode, so it builds without.
-            env.CGO_ENABLED = if pkgs.stdenv.hostPlatform.isDarwin then 1 else 0;
+            # The 1Password SDK's desktop-app sign-in needs cgo: it loads the
+            # app's library at run time, on Linux as on a Mac.
+            env.CGO_ENABLED = 1;
             ldflags = [ "-s" "-w" "-X main.version=${version}" ];
             meta = {
               description = "Hand secrets to one command at a time, after you've seen what is asked for and why";

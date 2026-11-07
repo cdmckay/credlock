@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -77,6 +78,9 @@ func (d Dialog) Approve(ctx context.Context, r Request) (bool, error) {
 		return false, nil
 	case ctx.Err() != nil:
 		return false, ErrTimedOut
+	case errors.Is(err, exec.ErrNotFound):
+		return false, errors.New("there is no dialog program to ask with: until credlock has a window of its own here, " +
+			"its helper asks in a zenity dialog, and needs zenity (or qarma, or matedialog) on the PATH it was started with")
 	default:
 		return false, err
 	}

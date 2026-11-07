@@ -149,6 +149,15 @@ with the cost of each way around it.
   login the running helper is launchd's. So `credlock hub on` never reloads a
   loaded job, which would drop every approval. `credlock hub off` stops the
   helper on purpose, first, so it exits cleanly, then unloads the job.
+- **On Linux the 1Password SDK finds the app's library in three fixed
+  places,** `/opt/1Password`, `/usr/bin/1password` and `/snap/bin/1password`,
+  with no override. NixOS keeps 1Password in the Nix store, so it needs a
+  link to `/opt/1Password`.
+- **Linux lets a process read its children's memory** (Yama's ptrace_scope
+  1), and `credlock run` starts the helper, then becomes the command it
+  runs. So on Linux the helper is started by `systemd-run --user`, and every
+  credlock process makes itself undumpable, which also closes
+  `/proc/PID/mem` and `environ` to anyone but root.
 
 ## Working on it
 

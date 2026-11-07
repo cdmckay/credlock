@@ -74,6 +74,31 @@ Then check that 1Password is running and unlocked. If it still fails, run
 `credlock stop`, then retry the command to clear a stale helper. Stopping
 forgets every approval. If a request was denied, ask the person instead of retrying it.
 
+### Linux (experimental)
+
+With 1Password for Linux, credlock can run its own helper there, as on a Mac,
+instead of asking a hub. It is off unless `CREDLOCK_LINUX_HELPER=1` is in the
+environment `credlock` runs in, because until credlock has an approval window
+of its own on Linux it asks in a zenity dialog, which doesn't keep all of the
+window's rules ([Limits](#limits)).
+
+- Install zenity, and turn on the SDK setting in 1Password as above.
+- The 1Password SDK looks for the app only where 1Password installs it:
+  `/opt/1Password` (where its `.deb` and `.rpm` put it), `/usr/bin/1password`
+  or `/snap/bin/1password`. On NixOS the app is in the Nix store instead, so
+  link it:
+
+  ```nix
+  systemd.tmpfiles.rules = [
+    "L+ /opt/1Password - - - - ${config.programs._1password-gui.package}/share/1password"
+  ];
+  ```
+- Where systemd runs a user manager, the helper runs as its service
+  `credlock-helper`, outside whatever started it, such as an agent's sandbox,
+  and with the session's display and `PATH` rather than the caller's.
+- There is no menu bar icon and no hub mode on Linux yet. `credlock status`
+  shows what the helper holds.
+
 ## Other machines on your tailnet
 
 A machine without 1Password, such as a Linux server, can still use
@@ -201,7 +226,8 @@ How it's kept safe:
   or a day after its approval, sooner if a run asked for less with `--ttl` or
   it was forgotten, and exits after an idle hour, unless hub mode is on.
 
-The socket lives in `~/Library/Caches/credlock`, a directory credlock keeps at
+The socket lives in `~/Library/Caches/credlock` on a Mac, and in
+`$XDG_RUNTIME_DIR/credlock` on Linux, a directory credlock keeps at
 mode 0700 and refuses to use if anyone else owns it.
 
 ## Limits
@@ -249,10 +275,17 @@ mode 0700 and refuses to use if anyone else owns it.
   first contact too, and one with no window to check, since the Mac already
   knows the machine. The Mac has to be awake, on the tailnet, with hub mode
   on.
-- Approving needs a Mac for now; other systems, such as Linux servers, ask
-  one (above). The operating-system pieces sit behind `internal/platform`. On
-  Linux, approvals would use a plain zenity dialog until credlock has a
-  window there too.
+- **Linux is experimental.** Its helper asks in a zenity dialog, not a window
+  of credlock's own. Esc denies and Deny has the focus, so Return denies, but
+  Tab then Return reaches Allow, and nothing ignores a click in its first
+  second. zenity is an ordinary GTK app, so a program running as you that
+  drives the desktop's accessibility interface (AT-SPI) may be able to press
+  Allow, with no permission asked, and under X11 rather than Wayland any X
+  client can click it. The helper finds zenity on the systemd user manager's
+  `PATH`, which a program running as you can change. There is no menu bar
+  icon, so a use isn't shown as it happens. Without systemd, the helper
+  starts with the caller's environment, its display and `PATH` included.
+  Other systems, such as Linux servers without 1Password, ask a Mac (above).
 
 ## Releases
 

@@ -7,6 +7,27 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Added
+
+- Experimental: on Linux, with `CREDLOCK_LINUX_HELPER=1`, credlock runs its
+  own helper against the 1Password app there, as on a Mac, instead of
+  asking a hub. It asks in a zenity dialog until it has an approval window
+  of its own on Linux, which doesn't keep all of the window's rules, so it
+  stays off without the switch. The helper runs as the systemd user service
+  `credlock-helper`, with the session's display and PATH rather than the
+  caller's. It has no menu bar icon and no hub mode yet. See Linux in the
+  README.
+- On Linux, a missing 1Password library or dialog program is explained:
+  where the 1Password SDK looks for the app, including the link NixOS needs,
+  and that the dialog needs zenity.
+
+### Security
+
+- On Linux, credlock's processes make themselves undumpable, so other
+  processes running as you can't read the secrets the helper and its
+  resolvers hold, through ptrace or `/proc`, and none are written to a core
+  dump.
+
 ## [0.5.1] - 2026-10-28
 
 ### Fixed

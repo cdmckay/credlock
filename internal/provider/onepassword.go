@@ -156,6 +156,12 @@ func (e *unresolved) Error() string {
 
 // connectError explains a failure to get a client for account.
 func connectError(account string, err error) error {
+	if strings.Contains(err.Error(), "desktop application not found") {
+		return fmt.Errorf("connecting to the 1Password app for account %s: %w. The 1Password SDK looks for the app "+
+			"only where 1Password installs it: /Applications/1Password.app on a Mac, and /opt/1Password, "+
+			"/usr/bin/1password or /snap/bin/1password on Linux. Check that 1Password is installed. On NixOS, "+
+			"link the 1Password package's share/1password directory to /opt/1Password", account, err)
+	}
 	if strings.Contains(err.Error(), "Denied authorization") {
 		return fmt.Errorf("1Password did not authorize credlock for account %s: the approval was declined in 1Password, "+
 			"or that account's SDK integration is off (1Password > Settings > Developer > Integrate with the 1Password SDKs > "+
