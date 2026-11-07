@@ -102,8 +102,11 @@ a hub instead ([below](#other-machines-on-your-tailnet)).
 - Where systemd runs a user manager, the helper runs as its service
   `credlock-helper`, outside whatever started it, such as an agent's sandbox,
   and with the session's display and `PATH` rather than the caller's.
-- There is no menu bar icon and no hub mode on Linux yet. `credlock status`
-  shows what the helper holds.
+- The menu bar icon is a tray icon on Linux: the same key, count, dot and
+  menu. Panels that host tray icons (StatusNotifierItem) show it, as KDE's
+  and most others do; GNOME's needs its AppIndicator extension, which
+  Ubuntu turns on. Without one, `credlock status` shows what the helper
+  holds. There is no hub mode on Linux yet.
 
 ## Other machines on your tailnet
 
@@ -292,9 +295,12 @@ mode 0700 and refuses to use if anyone else owns it.
   helper at a display of its own.** The helper shows its window on the
   display in the systemd user manager's environment, which such a program
   can change (`systemctl --user set-environment`), then restart the helper,
-  and click Allow in a compositor it runs itself. There is no menu bar icon
-  on Linux, so uses aren't shown as they happen. Without systemd, the helper
+  and click Allow in a compositor it runs itself. Where no panel shows tray
+  icons, uses aren't shown as they happen. Without systemd, the helper
   starts with the caller's environment, its display included.
+- **On Linux, any program running as you can press the tray menu's items**
+  over D-Bus, as the session bus lets it. They only ever take access away:
+  forget a secret, forget all, stop the helper, dismiss alerts.
 
 ## Releases
 

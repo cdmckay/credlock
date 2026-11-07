@@ -17,8 +17,13 @@ breaking change, and how a release is cut, is in [RELEASING.md](RELEASING.md).
   accessibility interface. Machines without 1Password, such as servers,
   still ask a hub. The helper runs as the systemd user service
   `credlock-helper`, with the session's display and PATH rather than the
-  caller's. There is no menu bar icon or hub mode on Linux yet. See Linux in
+  caller's. There is no hub mode on Linux yet. See Linux in
   the README.
+- On Linux, the menu bar icon is a tray icon (StatusNotifierItem): the key
+  with the number of secrets held, an orange dot while they are read, red
+  with alerts, and the Mac's menu, with the access log, the held secrets,
+  Forget and Stop. KDE and most desktops show it; GNOME needs its
+  AppIndicator extension.
 - A `headless` Nix package, without the window or GTK, for machines that
   only ask a hub.
 - On Linux, a missing 1Password library is explained: where the 1Password
